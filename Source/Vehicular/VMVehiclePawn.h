@@ -152,6 +152,8 @@ private:
 	void ToggleCamera();
 	void ApplyUpgrades();
 	void ApplyCarDefinition();
+	/** Loads the car model if the default path didn't find it and matches the wheels to its skeleton. */
+	void EnsureVehicleMesh();
 	void AddKitPart(const TCHAR* Shape, const FVector& Location, const FRotator& Rotation, const FVector& Scale, const FLinearColor& Color);
 	void UpdateEffects(float DeltaSeconds);
 	void UpdateEngineSound(float DeltaSeconds);

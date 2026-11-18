@@ -5,6 +5,8 @@
 #include "VMCarCatalog.generated.h"
 
 class AVMVehiclePawn;
+class USkeletalMesh;
+class UAnimInstance;
 
 /** Bolt-on parts built from basic shapes so each car reads differently. */
 UENUM(BlueprintType)
@@ -61,6 +63,14 @@ class VEHICULAR_API UVMCarCatalog : public UDeveloperSettings
 
 public:
 	UVMCarCatalog();
+
+	/** Car model for every car without its own Blueprint. Empty = find one automatically (prefers "SportsCar"). */
+	UPROPERTY(Config, EditAnywhere, Category = "Model")
+	TSoftObjectPtr<USkeletalMesh> DefaultVehicleMesh;
+
+	/** Animation Blueprint for that model (turns the wheels). Empty = find one next to the model. */
+	UPROPERTY(Config, EditAnywhere, Category = "Model")
+	TSoftClassPtr<UAnimInstance> DefaultVehicleAnimClass;
 
 	/** Ordered from starter car to top tier. */
 	UPROPERTY(Config, EditAnywhere, Category = "Cars")

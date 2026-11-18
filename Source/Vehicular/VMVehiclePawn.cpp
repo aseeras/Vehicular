@@ -8,6 +8,7 @@
 #include "VMAudioSettings.h"
 #include "VMCarCatalog.h"
 #include "VMEffectsSubsystem.h"
+#include "VMVehicleAssets.h"
 #include "VMRivalAIController.h"
 #include "VMUtil.h"
 #include "VMWheels.h"
@@ -134,6 +135,7 @@ void AVMVehiclePawn::BeginPlay()
 {
 	Super::BeginPlay();
 
+	EnsureVehicleMesh();
 	GetMesh()->OnComponentHit.AddDynamic(this, &AVMVehiclePawn::OnChassisHit);
 	Damage->OnDamaged.AddDynamic(this, &AVMVehiclePawn::OnDamaged);
 	Damage->OnPartBroken.AddDynamic(this, &AVMVehiclePawn::OnPartBroken);
@@ -980,6 +982,55 @@ void AVMVehiclePawn::ApplyCarDefinition()
 			AddKitPart(TEXT("Cylinder"), FVector(-60.f, 103.f, 35.f), FRotator(90.f, 0.f, 0.f), FVector(0.12f, 0.12f, 1.4f), Steel);
 			break;
 		}
+	}
+}
+
+void AVMVehiclePawn::EnsureVehicleMesh()
+{
+	USkeletalMeshComponent* VehicleMesh = GetMesh();
+	UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement();
+	bool bRebuildPhysics = false;
+
+	const VMVehicleAssets::FResolved Assets = VMVehicleAssets::Resolve();
+	if (!VehicleMesh->GetSkeletalMeshAsset() && Assets.Mesh)
+	{
+		VehicleMesh->SetSkeletalMeshAsset(Assets.Mesh);
+		bRebuildPhysics = true;
+	}
+	if (Assets.AnimClass && VehicleMesh->GetSkeletalMeshAsset() == Assets.Mesh && VehicleMesh->GetAnimClass() != Assets.AnimClass)
+	{
+		VehicleMesh->SetAnimInstanceClass(Assets.AnimClass);
+	}
+
+	// If the wheel bone names don't exist on this model, detect them from its skeleton.
+	USkeletalMesh* Mesh = VehicleMesh->GetSkeletalMeshAsset();
+	if (Mesh && Move && Move->WheelSetups.Num() >= 4)
+	{
+		bool bMissing = false;
+		for (const FChaosWheelSetup& Setup : Move->WheelSetups)
+		{
+			bMissing |= Mesh->GetRefSkeleton().FindBoneIndex(Setup.BoneName) == INDEX_NONE;
+		}
+		FName Wheels[4];
+		if (bMissing && VMVehicleAssets::FindWheelBones(Mesh, Wheels))
+		{
+			for (int32 i = 0; i < 4; ++i)
+			{
+				Move->WheelSetups[i].BoneName = Wheels[i];
+			}
+			UE_LOG(LogVehicular, Log, TEXT("Wheel bones: %s %s %s %s"), *Wheels[0].ToString(), *Wheels[1].ToString(), *Wheels[2].ToString(), *Wheels[3].ToString());
+			bRebuildPhysics = true;
+		}
+		else if (bMissing)
+		{
+			UE_LOG(LogVehicular, Error, TEXT("Couldn't find 4 wheel bones on %s - the car can't drive. Set the bone names in a Blueprint subclass."), *Mesh->GetName());
+		}
+	}
+
+	if (bRebuildPhysics && Move)
+	{
+		VehicleMesh->SetSimulatePhysics(true);
+		Move->RecreatePhysicsState();
 	}
 }
 

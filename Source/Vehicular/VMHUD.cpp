@@ -278,7 +278,7 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 
 	if (Car && !Car->HasVehicleMesh())
 	{
-		Label(TEXT("No car mesh found - add the Vehicle feature pack (see README)"), CX, Canvas->ClipY * 0.15f, FLinearColor(1.f, 0.2f, 0.2f), 1.4f, true);
+		Label(TEXT("No car model found - add the Vehicle content pack, or pick one in Project Settings > Vehicular Cars"), CX, Canvas->ClipY * 0.15f, FLinearColor(1.f, 0.2f, 0.2f), 1.4f, true);
 	}
 
 	switch (GM->GetMatchState())
