@@ -94,6 +94,11 @@ void AVMHUD::DrawHUD()
 		DrawGarage(GM);
 		return;
 	}
+	if (GM->IsInMenu())
+	{
+		DrawMenu(GM, false);
+		return;
+	}
 
 	if (Car)
 	{
@@ -272,9 +277,9 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 		break;
 	}
 
-	if (UGameplayStatics::IsGamePaused(this) && !GM->IsMatchOver())
+	if (GM->IsPauseMenuOpen())
 	{
-		Label(TEXT("PAUSED"), CX, CY, FLinearColor::White, 4.f, true);
+		DrawMenu(GM, true);
 	}
 }
 
@@ -286,7 +291,7 @@ void AVMHUD::DrawResults(AVMGameMode* GM, bool bWon)
 	Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
 	Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), GM->GetPoints(), GM->GetPedestriansKilled(), GM->GetRivalsWrecked()), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
 	Label(FString::Printf(TEXT("+%d credits"), GM->GetCreditsEarned()), CX, CY + 185.f * S, FLinearColor(0.4f, 0.9f, 1.f), 1.6f, true);
-	Label(TEXT("Press Enter / A for the garage"), CX, CY + 240.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+	Label(GM->IsQuickRace() ? TEXT("Press Enter / A to continue") : TEXT("Press Enter / A for the garage"), CX, CY + 240.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
 }
 
 void AVMHUD::DrawGarage(AVMGameMode* GM)
@@ -400,7 +405,7 @@ void AVMHUD::DrawGarage(AVMGameMode* GM)
 		{
 			int32 Rivals, Tier, Target;
 			GM->GetEventPreview(Event, Rivals, Tier, Target);
-			Label(FString::Printf(TEXT("START EVENT %d  >"), Event), Left + 24.f * S, Y + 8.f * S, FLinearColor(0.3f, 1.f, 0.35f), 1.6f);
+			Label(FString::Printf(TEXT("START EVENT %d  -  %s  >"), Event, *VMArenas::GetName(AVMGameMode::GetArenaForEvent(Event))), Left + 24.f * S, Y + 8.f * S, FLinearColor(0.3f, 1.f, 0.35f), 1.6f);
 			Label(FString::Printf(TEXT("%d rivals   rival upgrade tier %d   carnage target %d"), Rivals, Tier, Target), Left + 24.f * S, Y + 44.f * S, FLinearColor(0.75f, 0.75f, 0.75f), 0.95f);
 		}
 		Y += RowH;
@@ -410,5 +415,125 @@ void AVMHUD::DrawGarage(AVMGameMode* GM)
 	{
 		Label(GM->GetGarageNotice(), W * 0.5f, Y + 30.f * S, FLinearColor(1.f, 0.85f, 0.3f), 1.3f, true);
 	}
-	Label(TEXT("Up / Down to choose     Left / Right to browse cars     Enter / A to buy, select or start"), W * 0.5f, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.1f, true);
+	Label(TEXT("Up / Down to choose     Left / Right to browse cars     Enter / A to buy, select or start     Esc / B for menu"), W * 0.5f, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.1f, true);
+}
+
+void AVMHUD::DrawMenu(AVMGameMode* GM, bool bPause)
+{
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	const float CX = W * 0.5f;
+	const FLinearColor Accent(1.f, 0.55f, 0.1f);
+
+	// Lighter overlay so the orbiting car shows through.
+	DrawRect(FLinearColor(0.02f, 0.02f, 0.03f, bPause ? 0.7f : 0.55f), 0.f, 0.f, W, H);
+
+	FString Title;
+	FString Subtitle;
+	if (bPause)
+	{
+		Title = TEXT("PAUSED");
+		Subtitle = GM->IsQuickRace() ? TEXT("Quick race") : FString::Printf(TEXT("Event %d - %s"), GM->GetEventNumber(), *VMArenas::GetName(GM->GetCurrentArena()));
+	}
+	else
+	{
+		switch (GM->GetMenuScreen())
+		{
+		case EVMMenuScreen::Main:
+			Title = TEXT("VEHICULAR MANSLAUGHTER");
+			Subtitle = TEXT("Race. Ram. Run them down.");
+			break;
+		case EVMMenuScreen::ConfirmNewCareer:
+			Title = TEXT("NEW CAREER");
+			Subtitle = TEXT("Start over? All credits, upgrades, cars and progress will be lost.");
+			break;
+		case EVMMenuScreen::QuickRace:
+			Title = TEXT("QUICK RACE");
+			Subtitle = TEXT("One race on any arena. No credits, no career progress.");
+			break;
+		case EVMMenuScreen::Settings:
+			Title = TEXT("SETTINGS");
+			break;
+		case EVMMenuScreen::Controls:
+			Title = TEXT("CONTROLS");
+			break;
+		}
+	}
+
+	const float TitleY = 140.f * S;
+	Label(Title, CX, TitleY, Accent, bPause ? 3.5f : 4.5f, true);
+	if (!Subtitle.IsEmpty())
+	{
+		Label(Subtitle, CX, TitleY + 75.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+	}
+
+	float Y = 300.f * S;
+	if (!bPause && GM->GetMenuScreen() == EVMMenuScreen::Controls)
+	{
+		DrawControls(CX - 420.f * S, Y);
+		Y = H - 200.f * S;
+	}
+	if (!bPause && GM->GetMenuScreen() == EVMMenuScreen::QuickRace)
+	{
+		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+		{
+			Label(VMArenas::GetBlurb(Profile->QuickArena), CX, Y - 30.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.f, true);
+		}
+	}
+
+	TArray<FVMMenuRow> Rows;
+	GM->GetMenuRows(Rows);
+	const float RowW = 700.f * S;
+	const float RowH = 64.f * S;
+	const float Left = CX - RowW * 0.5f;
+	for (int32 i = 0; i < Rows.Num(); ++i)
+	{
+		const bool bSelected = i == GM->GetMenuSelection();
+		DrawRect(bSelected ? FLinearColor(1.f, 0.55f, 0.1f, 0.3f) : FLinearColor(1.f, 1.f, 1.f, 0.06f), Left, Y, RowW, RowH - 8.f * S);
+		if (bSelected)
+		{
+			DrawRect(Accent, Left, Y, 6.f * S, RowH - 8.f * S);
+		}
+		Label(Rows[i].Label, Left + 28.f * S, Y + 14.f * S, bSelected ? FLinearColor::White : FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
+		if (!Rows[i].Value.IsEmpty())
+		{
+			const FString Value = Rows[i].bAdjustable ? FString::Printf(TEXT("<  %s  >"), *Rows[i].Value) : Rows[i].Value;
+			float TW, TH;
+			GetTextSize(Value, TW, TH, Font, 1.2f * S);
+			Label(Value, Left + RowW - TW - 28.f * S, Y + 17.f * S, bSelected ? Accent : FLinearColor(0.65f, 0.65f, 0.65f), 1.2f);
+		}
+		Y += RowH;
+	}
+
+	const TCHAR* Hint = bPause
+		? TEXT("Up / Down to choose     Enter / A to select     P / Start / Esc to resume")
+		: TEXT("Up / Down to choose     Left / Right to change     Enter / A to select     Esc / B to go back");
+	Label(Hint, CX, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.05f, true);
+}
+
+void AVMHUD::DrawControls(float X, float Y)
+{
+	struct FLine { const TCHAR* Action; const TCHAR* Keys; const TCHAR* Pad; };
+	static const FLine Lines[] = {
+		{ TEXT("Throttle / reverse"), TEXT("W / S"), TEXT("RT / LT") },
+		{ TEXT("Steer"), TEXT("A / D"), TEXT("Left stick") },
+		{ TEXT("Handbrake"), TEXT("Space"), TEXT("B") },
+		{ TEXT("Nitro"), TEXT("Left Shift"), TEXT("A") },
+		{ TEXT("Use weapon"), TEXT("E"), TEXT("X") },
+		{ TEXT("Recover"), TEXT("R"), TEXT("Y") },
+		{ TEXT("Camera"), TEXT("C"), TEXT("Right stick click") },
+		{ TEXT("Pause"), TEXT("P"), TEXT("Start") },
+	};
+	const FLinearColor Head(1.f, 0.55f, 0.1f);
+	Label(TEXT("ACTION"), X, Y, Head, 1.1f);
+	Label(TEXT("KEYBOARD"), X + 380.f * S, Y, Head, 1.1f);
+	Label(TEXT("GAMEPAD"), X + 640.f * S, Y, Head, 1.1f);
+	Y += 44.f * S;
+	for (const FLine& Line : Lines)
+	{
+		Label(Line.Action, X, Y, FLinearColor::White, 1.15f);
+		Label(Line.Keys, X + 380.f * S, Y, FLinearColor(0.8f, 0.8f, 0.8f), 1.15f);
+		Label(Line.Pad, X + 640.f * S, Y, FLinearColor(0.8f, 0.8f, 0.8f), 1.15f);
+		Y += 40.f * S;
+	}
 }

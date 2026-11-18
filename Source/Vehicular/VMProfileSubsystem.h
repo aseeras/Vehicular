@@ -7,6 +7,14 @@
 
 class UVMSaveGame;
 
+/** What the next level load should open into. */
+enum class EVMLoadIntent : uint8
+{
+	MainMenu,
+	CareerRace,
+	QuickRace
+};
+
 /** Owns the career save and lives for the whole session, so it survives level reloads. */
 UCLASS()
 class VEHICULAR_API UVMProfileSubsystem : public UGameInstanceSubsystem
@@ -40,14 +48,29 @@ public:
 	void RecordEvent(bool bWon, int32 Points);
 	void ResetCareer();
 
-	/** Set when leaving the garage so the reloaded level goes straight to the race. */
-	void SetSkipGarageOnNextLoad(bool bSkip) { bSkipGarage = bSkip; }
-	bool ConsumeSkipGarage();
+	// Level-load routing (kept in memory across level loads, not saved).
+	void SetNextLoadIntent(EVMLoadIntent Intent) { LoadIntent = Intent; }
+	EVMLoadIntent PeekLoadIntent() const { return LoadIntent; }
+	EVMLoadIntent ConsumeLoadIntent();
+
+	// Quick race options (in memory).
+	EVMArena QuickArena = EVMArena::Lot;
+	int32 QuickDifficulty = 1;
+
+	// Settings (saved).
+	float GetMasterVolume() const;
+	float GetEffectsVolume() const;
+	float GetEngineVolume() const;
+	float GetParticleDensity() const;
+	void SetMasterVolume(float Value);
+	void SetEffectsVolume(float Value);
+	void SetEngineVolume(float Value);
+	void SetParticleDensity(float Value);
 
 private:
 	void Save();
 	void EnsureStarterCar();
 
 	UPROPERTY() TObjectPtr<UVMSaveGame> Profile;
-	bool bSkipGarage = false;
+	EVMLoadIntent LoadIntent = EVMLoadIntent::MainMenu;
 };

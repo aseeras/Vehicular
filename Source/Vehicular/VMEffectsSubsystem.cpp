@@ -1,5 +1,6 @@
 #include "VMEffectsSubsystem.h"
 #include "VMUtil.h"
+#include "VMProfileSubsystem.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/World.h"
@@ -89,7 +90,12 @@ bool UVMEffectsSubsystem::EnsureHost()
 
 int32 UVMEffectsSubsystem::Scaled(int32 Count) const
 {
-	return FMath::Max(1, FMath::RoundToInt(Count * GetDefault<UVMEffectsSettings>()->ParticleDensity));
+	float Density = GetDefault<UVMEffectsSettings>()->ParticleDensity;
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(GetWorld()))
+	{
+		Density *= Profile->GetParticleDensity();
+	}
+	return FMath::Max(1, FMath::RoundToInt(Count * Density));
 }
 
 void UVMEffectsSubsystem::Emit(EVMParticleLayer Layer, const FVMParticle& Particle)

@@ -92,10 +92,12 @@ void AVMGameMode::EnsureArena()
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		// Each event gets its own layout of pillars and pickups.
 		Arena = World->SpawnActorDeferred<AVMArenaBuilder>(AVMArenaBuilder::StaticClass(), FTransform::Identity, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		Arena->RandomSeed = 1337 + 7919 * EventNumber;
+		Arena->ArenaType = CurrentArena;
+		Arena->RandomSeed = bQuickRace ? FMath::Rand() : 1337 + 7919 * EventNumber;
 		Arena->FinishSpawning(FTransform::Identity);
 		Arena->Build();
 		Checkpoints = Arena->GetCheckpoints();
+		MaxPedestrians = Arena->GetPedestrianCount();
 	}
 
 	Algo::Sort(Checkpoints, [](const TObjectPtr<AVMCheckpoint>& A, const TObjectPtr<AVMCheckpoint>& B)
@@ -103,7 +105,7 @@ void AVMGameMode::EnsureArena()
 		return A->Index < B->Index;
 	});
 
-	AVMArenaBuilder::EnsureLighting(World);
+	AVMArenaBuilder::EnsureLighting(World, CurrentArena);
 
 	bool bHasPlayerStart = false;
 	for (TActorIterator<APlayerStart> It(World); It; ++It)
@@ -155,11 +157,12 @@ void AVMGameMode::StartPlay()
 	TimeLeft = StartingTime;
 	CountdownLeft = CountdownSeconds;
 
-	// Fresh launch opens the garage first; leaving the garage reloads the level straight into the race.
+	// A fresh launch opens the main menu; starting a race from a menu reloads the level into the race.
 	UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
-	if (Profile && !Profile->ConsumeSkipGarage())
+	const EVMLoadIntent Intent = Profile ? Profile->ConsumeLoadIntent() : EVMLoadIntent::CareerRace;
+	if (Intent == EVMLoadIntent::MainMenu)
 	{
-		OpenGarage();
+		OpenMainMenu();
 	}
 	else
 	{
@@ -174,7 +177,8 @@ void AVMGameMode::StartPlay()
 
 	if (State == EVMMatchState::Countdown)
 	{
-		PushMessage(FString::Printf(TEXT("EVENT %d - win: finish %d laps, wreck every rival, or score %d points"), EventNumber, NumLaps, TargetPoints), FLinearColor::White, 6.f);
+		const FString Title = bQuickRace ? TEXT("QUICK RACE") : FString::Printf(TEXT("EVENT %d"), EventNumber);
+		PushMessage(FString::Printf(TEXT("%s: %s - finish %d laps, wreck every rival, or score %d points"), *Title, *VMArenas::GetName(CurrentArena), NumLaps, TargetPoints), FLinearColor::White, 6.f);
 	}
 }
 
@@ -491,15 +495,20 @@ void AVMGameMode::EndMatch(bool bWon, const FString& Reason)
 	State = bWon ? EVMMatchState::Won : EVMMatchState::Lost;
 	ResultText = Reason;
 
-	CreditsEarned = Points / FMath::Max(1, PointsPerCredit);
-	if (bWon)
+	// Quick races are just for fun: no credits, no career progress.
+	CreditsEarned = 0;
+	if (!bQuickRace)
 	{
-		CreditsEarned += WinCreditBonus + WinCreditBonusPerEvent * (EventNumber - 1);
-	}
-	if (UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
-	{
-		Profile->AwardCredits(CreditsEarned);
-		Profile->RecordEvent(bWon, Points);
+		CreditsEarned = Points / FMath::Max(1, PointsPerCredit);
+		if (bWon)
+		{
+			CreditsEarned += WinCreditBonus + WinCreditBonusPerEvent * (EventNumber - 1);
+		}
+		if (UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+		{
+			Profile->AwardCredits(CreditsEarned);
+			Profile->RecordEvent(bWon, Points);
+		}
 	}
 	UVMSoundSubsystem::Play2D(this, bWon ? EVMSound::Fanfare : EVMSound::Defeat);
 	UE_LOG(LogVehicular, Log, TEXT("Match over (%s): %s"), bWon ? TEXT("won") : TEXT("lost"), *Reason);
@@ -535,7 +544,9 @@ void AVMGameMode::ConfigureEvent()
 	BaseTargetPoints = TargetPoints;
 	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
 	{
-		EventNumber = Profile->GetEventNumber();
+		bQuickRace = Profile->PeekLoadIntent() == EVMLoadIntent::QuickRace;
+		EventNumber = bQuickRace ? Profile->QuickDifficulty : Profile->GetEventNumber();
+		CurrentArena = bQuickRace ? Profile->QuickArena : GetArenaForEvent(EventNumber);
 	}
 	GetEventPreview(EventNumber, NumRivals, RivalTier, TargetPoints);
 }
@@ -559,6 +570,23 @@ void AVMGameMode::OpenGarage()
 
 void AVMGameMode::NavigateGarage(int32 Direction)
 {
+	if (IsPauseMenuOpen())
+	{
+		PauseSelection = (PauseSelection + Direction + 3) % 3;
+		UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove, 0.6f);
+		return;
+	}
+	if (IsInMenu())
+	{
+		TArray<FVMMenuRow> Rows;
+		GetMenuRows(Rows);
+		if (Rows.Num() > 0)
+		{
+			MenuSelection = (MenuSelection + Direction + Rows.Num()) % Rows.Num();
+			UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove, 0.6f);
+		}
+		return;
+	}
 	if (!IsInGarage())
 	{
 		return;
@@ -571,6 +599,11 @@ void AVMGameMode::NavigateGarage(int32 Direction)
 
 void AVMGameMode::NavigateGarageSide(int32 Direction)
 {
+	if (IsInMenu())
+	{
+		AdjustMenuRow(Direction);
+		return;
+	}
 	const int32 Count = UVMCarCatalog::GetCars().Num();
 	if (!IsInGarage() || GarageSelection != GetCarRowIndex() || Count == 0)
 	{
@@ -583,9 +616,26 @@ void AVMGameMode::NavigateGarageSide(int32 Direction)
 
 void AVMGameMode::HandleConfirm()
 {
+	if (IsPauseMenuOpen())
+	{
+		ActivatePauseRow();
+		return;
+	}
+	if (IsInMenu())
+	{
+		ActivateMenuRow();
+		return;
+	}
 	if (IsMatchOver())
 	{
-		OpenGarage();
+		if (bQuickRace)
+		{
+			OpenMainMenu(EVMMenuScreen::QuickRace);
+		}
+		else
+		{
+			OpenGarage();
+		}
 		UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove);
 		return;
 	}
@@ -644,7 +694,7 @@ void AVMGameMode::HandleConfirm()
 	// Start the event: reload the level so the arena, rivals and upgrades are rebuilt.
 	if (Profile)
 	{
-		Profile->SetSkipGarageOnNextLoad(true);
+		Profile->SetNextLoadIntent(EVMLoadIntent::CareerRace);
 	}
 	RestartMatch();
 }

@@ -125,14 +125,29 @@ void UVMProfileSubsystem::RecordEvent(bool bWon, int32 Points)
 
 void UVMProfileSubsystem::ResetCareer()
 {
-	Profile = Cast<UVMSaveGame>(UGameplayStatics::CreateSaveGameObject(UVMSaveGame::StaticClass()));
+	UVMSaveGame* Fresh = Cast<UVMSaveGame>(UGameplayStatics::CreateSaveGameObject(UVMSaveGame::StaticClass()));
+	// Keep the player's settings.
+	Fresh->MasterVolume = Profile->MasterVolume;
+	Fresh->EffectsVolume = Profile->EffectsVolume;
+	Fresh->EngineVolume = Profile->EngineVolume;
+	Fresh->ParticleDensity = Profile->ParticleDensity;
+	Profile = Fresh;
 	EnsureStarterCar();
 	Save();
 }
 
-bool UVMProfileSubsystem::ConsumeSkipGarage()
+EVMLoadIntent UVMProfileSubsystem::ConsumeLoadIntent()
 {
-	const bool bResult = bSkipGarage;
-	bSkipGarage = false;
-	return bResult;
+	const EVMLoadIntent Result = LoadIntent;
+	LoadIntent = EVMLoadIntent::MainMenu;
+	return Result;
 }
+
+float UVMProfileSubsystem::GetMasterVolume() const { return Profile->MasterVolume; }
+float UVMProfileSubsystem::GetEffectsVolume() const { return Profile->EffectsVolume; }
+float UVMProfileSubsystem::GetEngineVolume() const { return Profile->EngineVolume; }
+float UVMProfileSubsystem::GetParticleDensity() const { return Profile->ParticleDensity; }
+void UVMProfileSubsystem::SetMasterVolume(float Value) { Profile->MasterVolume = FMath::Clamp(Value, 0.f, 1.f); Save(); }
+void UVMProfileSubsystem::SetEffectsVolume(float Value) { Profile->EffectsVolume = FMath::Clamp(Value, 0.f, 1.f); Save(); }
+void UVMProfileSubsystem::SetEngineVolume(float Value) { Profile->EngineVolume = FMath::Clamp(Value, 0.f, 1.f); Save(); }
+void UVMProfileSubsystem::SetParticleDensity(float Value) { Profile->ParticleDensity = FMath::Clamp(Value, 0.25f, 1.5f); Save(); }

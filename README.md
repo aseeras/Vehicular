@@ -32,14 +32,41 @@ The project file targets UE 5.7. If you have a newer engine, right-click `Vehicu
    - To use your own car instead, see "Using your own assets" below.
 4. Press **Play**.
 
-You don't need to build a level. When the loaded map has no checkpoints, the game creates its own arena at
-startup from engine basic shapes. That arena includes:
+You don't need to build a level. When the loaded map has no checkpoints, the game builds one of its four
+arenas at startup from engine basic shapes, including sky and lighting if the map has none (see
+[Arenas](#arenas)).
 
-- an oval circuit with 8 checkpoint gates
-- a broken inner barrier you can cut through
-- a central plaza with jump ramps and pillars
-- 18 pickups and 60 pedestrians
-- sky and lighting, if the map has none
+## Main menu
+
+The game opens on the main menu, with the car slowly circling behind it:
+
+- **Career:** opens the garage for your current event.
+- **New Career:** wipes credits, upgrades, cars and progress, after asking you to confirm. Your settings
+  are kept.
+- **Quick Race:** one race on any arena, with any car you own and a rival difficulty from 1 to 8. It gives
+  no credits and no career progress.
+- **Settings:**
+  - master, effects and engine volume
+  - particle amount
+  - graphics quality (Low to Epic)
+  - window mode (fullscreen, borderless or windowed)
+- **Controls:** the full control list.
+- **Quit**
+
+During a race, press **P / Start** to open the pause menu: Resume, Restart, or Quit to main menu. In menus,
+**Esc / Backspace / B** goes back. In the editor, Esc ends Play-In-Editor, so use Backspace there instead.
+
+## Arenas
+
+| Arena      | Layout | Pedestrians |
+|------------|--------|-------------|
+| The Lot    | Oval circuit, broken inner barrier, central jump plaza with pillars | 60 |
+| Salt Flats | Huge figure-8 with a head-on crossroads in the middle, rock spires, big lobe jumps, bright noon sun | 45 |
+| Dockyard   | Fast loop round a container-stack maze with two cross-yard shortcuts, gantry cranes, overcast | 55 |
+| Downtown   | Ring road around a 4×3 grid of city blocks, with side streets as shortcuts, crowded sidewalks and towers at sunset | 90 |
+
+Career events rotate through the arenas in that order. Each event also gets its own random layout of
+props and pickups.
 
 ## Controls
 
@@ -53,7 +80,8 @@ startup from engine basic shapes. That arena includes:
 | Recover (flip back) | R               | Y                  |
 | Camera (chase/hood) | C               | Right stick click  |
 | Pause               | P               | Start              |
-| Continue / buy / start (menus) | Enter | A or Back     |
+| Select (menus)        | Enter         | A                 |
+| Back (menus)          | Esc / Backspace | B               |
 | Garage menu up / down | ↑ ↓ or W / S  | D-pad             |
 | Browse cars (garage)  | ← → or A / D  | D-pad left / right |
 
@@ -81,7 +109,7 @@ startup from engine basic shapes. That arena includes:
 
 ## Career and garage
 
-- The game opens in the **garage**. Choose **Start Event** to race.
+- Choose **Career** on the main menu to open the **garage**, then choose **Start Event** to race.
 - After each match, press Enter or A to return to the garage.
 - **Credits earned:** your points ÷ 5, plus a win bonus of 1,000 + 250 × (event − 1).
 - Progress saves automatically to the `VehicularCareer` save slot. To start over, delete
@@ -194,7 +222,8 @@ All the gameplay classes can be subclassed in Blueprint:
 | `VMPedestrian` | Wandering and panicking pedestrians, knockdown physics |
 | `VMCheckpoint` | Race gates |
 | `VMPickup`, `VMOilSlick` | Power-ups and the oil hazard |
-| `VMArenaBuilder` | Procedural default arena and lighting |
+| `VMArenaBuilder` | The four procedural arenas, their track shapes and lighting |
+| `VMGameModeMenus.cpp` | Main menu, quick race, settings, controls and pause menu |
 | `VMHUD` | Canvas HUD and garage screen (no UMG assets needed) |
 | `VMProfileSubsystem`, `VMSaveGame` | Career save: credits, upgrades, event progress |
 | `VMSoundSubsystem`, `VMSynth` | Procedural sound effects and engine audio |
@@ -209,6 +238,6 @@ compiled yet**. Expect a few small fixes on the first build, depending on your e
 
 Ideas for next steps:
 
-- a main menu with settings
-- more arena types
+- more arenas
+- custom key rebinding
 - Niagara versions of the continuous effects (smoke, fire, tyre smoke, nitro flames)

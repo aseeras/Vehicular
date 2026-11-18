@@ -31,8 +31,49 @@ enum class EVMMatchState : uint8
 	Racing,
 	Won,
 	Lost,
-	Garage
+	Garage,
+	Menu
 };
+
+/** The built-in arenas. Career events rotate through them in order. */
+UENUM(BlueprintType)
+enum class EVMArena : uint8
+{
+	Lot,
+	SaltFlats,
+	Dockyard,
+	Downtown,
+	Count UMETA(Hidden)
+};
+
+namespace VMArenas
+{
+	constexpr int32 Num = static_cast<int32>(EVMArena::Count);
+
+	inline FString GetName(EVMArena Arena)
+	{
+		switch (Arena)
+		{
+		case EVMArena::Lot:       return TEXT("THE LOT");
+		case EVMArena::SaltFlats: return TEXT("SALT FLATS");
+		case EVMArena::Dockyard:  return TEXT("DOCKYARD");
+		case EVMArena::Downtown:  return TEXT("DOWNTOWN");
+		default:                  return TEXT("-");
+		}
+	}
+
+	inline FString GetBlurb(EVMArena Arena)
+	{
+		switch (Arena)
+		{
+		case EVMArena::Lot:       return TEXT("Oval circuit around a jump plaza, with gaps to cut through");
+		case EVMArena::SaltFlats: return TEXT("Wide-open figure eight with a deadly crossroads in the middle");
+		case EVMArena::Dockyard:  return TEXT("Container maze ringed by a fast loop under the cranes");
+		case EVMArena::Downtown:  return TEXT("City blocks, side streets and crowded sidewalks");
+		default:                  return FString();
+		}
+	}
+}
 
 /** Procedurally synthesised sound effects (override any of them in Project Settings > Vehicular Audio). */
 UENUM(BlueprintType)

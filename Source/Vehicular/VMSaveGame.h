@@ -19,4 +19,10 @@ public:
 	UPROPERTY() FVMUpgradeLevels Upgrades;
 	UPROPERTY() TArray<FName> OwnedCars;
 	UPROPERTY() FName SelectedCar;
+
+	// Settings (0..1 volumes, particle density 0.25..1.5).
+	UPROPERTY() float MasterVolume = 1.f;
+	UPROPERTY() float EffectsVolume = 1.f;
+	UPROPERTY() float EngineVolume = 1.f;
+	UPROPERTY() float ParticleDensity = 1.f;
 };

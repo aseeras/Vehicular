@@ -19,6 +19,23 @@ struct FVMRaceProgress
 	UPROPERTY() int32 LapsCompleted = 0;
 };
 
+enum class EVMMenuScreen : uint8
+{
+	Main,
+	ConfirmNewCareer,
+	QuickRace,
+	Settings,
+	Controls
+};
+
+/** One line of a menu, as the HUD draws it. Adjustable rows show "< Value >" and react to left/right. */
+struct FVMMenuRow
+{
+	FString Label;
+	FString Value;
+	bool bAdjustable = false;
+};
+
 USTRUCT(BlueprintType)
 struct FVMFeedMessage
 {
@@ -93,6 +110,17 @@ public:
 	/** Left/right: browses cars when the car row is selected. */
 	void NavigateGarageSide(int32 Direction);
 	void OpenGarage();
+
+	// --- Menus (main menu, sub-screens and pause) ---
+	void OpenMainMenu(EVMMenuScreen Screen = EVMMenuScreen::Main);
+	/** Back / Escape: leaves sub-menus, the garage and the pause menu. */
+	void HandleBack();
+	/** Pause key: opens or closes the pause menu during a race. */
+	void TogglePause();
+	EVMMenuScreen GetMenuScreen() const { return MenuScreen; }
+	int32 GetMenuSelection() const { return IsPauseMenuOpen() ? PauseSelection : MenuSelection; }
+	/** Rows for the current menu screen, or the pause menu while paused. */
+	void GetMenuRows(TArray<FVMMenuRow>& OutRows) const;
 	int32 GetGarageSelection() const { return GarageSelection; }
 	/** Upgrades, then the car row, then "start event". */
 	int32 GetNumGarageItems() const { return VMUpgrades::NumUpgrades + 2; }
@@ -110,6 +138,11 @@ public:
 	bool IsRaceLive() const { return State == EVMMatchState::Racing; }
 	bool IsMatchOver() const { return State == EVMMatchState::Won || State == EVMMatchState::Lost; }
 	bool IsInGarage() const { return State == EVMMatchState::Garage; }
+	bool IsInMenu() const { return State == EVMMatchState::Menu; }
+	bool IsPauseMenuOpen() const;
+	bool IsQuickRace() const { return bQuickRace; }
+	EVMArena GetCurrentArena() const { return CurrentArena; }
+	static EVMArena GetArenaForEvent(int32 InEvent) { return static_cast<EVMArena>((FMath::Max(1, InEvent) - 1) % VMArenas::Num); }
 	float GetTimeLeft() const { return TimeLeft; }
 	float GetCountdownLeft() const { return CountdownLeft; }
 	int32 GetPoints() const { return Points; }
@@ -131,6 +164,9 @@ public:
 
 private:
 	void EnsureArena();
+	void ActivateMenuRow();
+	void AdjustMenuRow(int32 Direction);
+	void ActivatePauseRow();
 	void ConfigureEvent();
 	FTransform GetGridTransform(int32 Slot) const;
 	void SpawnRivals();
@@ -171,6 +207,11 @@ private:
 	int32 CreditsEarned = 0;
 	int32 GarageSelection = 0;
 	int32 GarageCarIndex = 0;
+	EVMMenuScreen MenuScreen = EVMMenuScreen::Main;
+	int32 MenuSelection = 0;
+	int32 PauseSelection = 0;
+	bool bQuickRace = false;
+	EVMArena CurrentArena = EVMArena::Lot;
 	int32 LastCountdownBeep = -1;
 	FString GarageNotice;
 };

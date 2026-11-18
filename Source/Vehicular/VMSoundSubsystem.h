@@ -36,6 +36,7 @@ public:
 private:
 	USoundBase* ResolveSound(EVMSound Sound, float& OutDuration);
 	bool PassesRateLimit(EVMSound Sound);
+	float EffectsGain() const;
 	void TrackOneShot(UAudioComponent* Component, float Duration);
 
 	UPROPERTY() TObjectPtr<USoundAttenuation> Attenuation;

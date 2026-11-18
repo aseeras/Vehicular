@@ -1,6 +1,7 @@
 #include "VMSoundSubsystem.h"
 #include "VMAudioSettings.h"
 #include "VMSynth.h"
+#include "VMProfileSubsystem.h"
 
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
@@ -74,6 +75,16 @@ void UVMSoundSubsystem::Play2D(const UObject* WorldContext, EVMSound Sound, floa
 	}
 }
 
+float UVMSoundSubsystem::EffectsGain() const
+{
+	float Gain = GetDefault<UVMAudioSettings>()->EffectsVolume;
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(GetWorld()))
+	{
+		Gain *= Profile->GetMasterVolume() * Profile->GetEffectsVolume();
+	}
+	return Gain;
+}
+
 bool UVMSoundSubsystem::PassesRateLimit(EVMSound Sound)
 {
 	const double Now = GetWorld()->GetRealTimeSeconds();
@@ -136,7 +147,7 @@ void UVMSoundSubsystem::PlaySoundAt(EVMSound Sound, const FVector& Location, flo
 	float Duration;
 	if (USoundBase* Asset = ResolveSound(Sound, Duration))
 	{
-		const float FinalVolume = Volume * GetDefault<UVMAudioSettings>()->EffectsVolume;
+		const float FinalVolume = Volume * EffectsGain();
 		UAudioComponent* AC = UGameplayStatics::SpawnSoundAtLocation(this, Asset, Location, FRotator::ZeroRotator, FinalVolume, Pitch, 0.f, Attenuation);
 		TrackOneShot(AC, Duration / FMath::Max(0.1f, Pitch));
 	}
@@ -151,7 +162,7 @@ void UVMSoundSubsystem::PlaySound2D(EVMSound Sound, float Volume, float Pitch)
 	float Duration;
 	if (USoundBase* Asset = ResolveSound(Sound, Duration))
 	{
-		const float FinalVolume = Volume * GetDefault<UVMAudioSettings>()->EffectsVolume;
+		const float FinalVolume = Volume * EffectsGain();
 		UAudioComponent* AC = UGameplayStatics::SpawnSound2D(this, Asset, FinalVolume, Pitch);
 		TrackOneShot(AC, Duration / FMath::Max(0.1f, Pitch));
 	}

@@ -233,7 +233,18 @@ void AVMVehiclePawn::UpdateEngineSound(float DeltaSeconds)
 
 	const float TargetVolume = IsWrecked() ? 0.f : 0.35f + 0.45f * FMath::Abs(Move->GetThrottleInput()) + (bWasBoosting ? 0.2f : 0.f);
 	EngineVolume = FMath::FInterpTo(EngineVolume, TargetVolume, DeltaSeconds, 6.f);
-	EngineAudio->SetVolumeMultiplier(EngineVolume * GetDefault<UVMAudioSettings>()->EngineVolume);
+	float UserVolume = 1.f;
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		UserVolume = Profile->GetMasterVolume() * Profile->GetEngineVolume();
+	}
+	// Quieter engines behind the menus.
+	const AVMGameMode* GM = GetVMGameMode();
+	if (GM && (GM->IsInMenu() || GM->IsInGarage()))
+	{
+		UserVolume *= 0.3f;
+	}
+	EngineAudio->SetVolumeMultiplier(EngineVolume * UserVolume * GetDefault<UVMAudioSettings>()->EngineVolume);
 }
 
 bool AVMVehiclePawn::IsWrecked() const
@@ -299,6 +310,18 @@ void AVMVehiclePawn::Tick(float DeltaSeconds)
 	bWasBoosting = bBoosting;
 	UpdateEngineSound(DeltaSeconds);
 	UpdateEffects(DeltaSeconds);
+
+	// Slow showroom orbit behind the menus and garage.
+	if (!bIsRival)
+	{
+		const AVMGameMode* GM = GetVMGameMode();
+		if (GM && (GM->IsInMenu() || GM->IsInGarage()))
+		{
+			MenuOrbitYaw = FMath::Fmod(MenuOrbitYaw + 8.f * DeltaSeconds, 360.f);
+			SpringArm->SetRelativeRotation(FRotator(-15.f, MenuOrbitYaw + 150.f, 0.f));
+			SpringArm->TargetArmLength = 800.f;
+		}
+	}
 
 	if (bHandlingDirty)
 	{
@@ -726,6 +749,12 @@ void AVMVehiclePawn::BuildInputAssets()
 	NavDownAction = MakeAction(this, TEXT("IA_NavDown"), EInputActionValueType::Boolean);
 	NavLeftAction = MakeAction(this, TEXT("IA_NavLeft"), EInputActionValueType::Boolean);
 	NavRightAction = MakeAction(this, TEXT("IA_NavRight"), EInputActionValueType::Boolean);
+	BackAction = MakeAction(this, TEXT("IA_Back"), EInputActionValueType::Boolean);
+	// Menu actions must keep working while the game is paused (pause menu).
+	for (UInputAction* MenuAction : { NavUpAction.Get(), NavDownAction.Get(), NavLeftAction.Get(), NavRightAction.Get(), RestartAction.Get(), BackAction.Get() })
+	{
+		MenuAction->bTriggerWhenPaused = true;
+	}
 
 	InputContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Vehicle"));
 
@@ -767,6 +796,9 @@ void AVMVehiclePawn::BuildInputAssets()
 	InputContext->MapKey(NavRightAction, EKeys::Right);
 	InputContext->MapKey(NavRightAction, EKeys::D);
 	InputContext->MapKey(NavRightAction, EKeys::Gamepad_DPad_Right);
+	InputContext->MapKey(BackAction, EKeys::Escape);
+	InputContext->MapKey(BackAction, EKeys::BackSpace);
+	InputContext->MapKey(BackAction, EKeys::Gamepad_FaceButton_Right);
 	InputContext->MapKey(PauseAction, EKeys::P);
 	InputContext->MapKey(PauseAction, EKeys::Gamepad_Special_Right);
 }
@@ -812,6 +844,7 @@ void AVMVehiclePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	Input->BindAction(NavDownAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavDownInput);
 	Input->BindAction(NavLeftAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavLeftInput);
 	Input->BindAction(NavRightAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavRightInput);
+	Input->BindAction(BackAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnBackInput);
 }
 
 void AVMVehiclePawn::OnThrottleInput(const FInputActionValue& Value) { PlayerThrottle = Value.Get<float>(); }
@@ -848,12 +881,18 @@ void AVMVehiclePawn::OnNavDownInput()
 
 void AVMVehiclePawn::OnPauseInput()
 {
-	const AVMGameMode* GM = GetVMGameMode();
-	if (GM && (GM->IsMatchOver() || GM->IsInGarage()))
+	if (AVMGameMode* GM = GetVMGameMode())
 	{
-		return;
+		GM->TogglePause();
 	}
-	UGameplayStatics::SetGamePaused(this, !UGameplayStatics::IsGamePaused(this));
+}
+
+void AVMVehiclePawn::OnBackInput()
+{
+	if (AVMGameMode* GM = GetVMGameMode())
+	{
+		GM->HandleBack();
+	}
 }
 
 void AVMVehiclePawn::OnNavLeftInput()

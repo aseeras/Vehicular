@@ -31,6 +31,8 @@ private:
 	void DrawRivalTags(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawGarage(AVMGameMode* GM);
+	void DrawMenu(AVMGameMode* GM, bool bPause);
+	void DrawControls(float X, float Y);
 	void DrawResults(AVMGameMode* GM, bool bWon);
 
 	float S = 1.f;

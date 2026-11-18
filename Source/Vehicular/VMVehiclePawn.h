@@ -163,6 +163,7 @@ private:
 	void OnNavDownInput();
 	void OnNavLeftInput();
 	void OnNavRightInput();
+	void OnBackInput();
 	void OnPauseInput();
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
@@ -179,6 +180,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> NavDownAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> NavLeftAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> NavRightAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> BackAction;
 
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> EngineAudio;
 
@@ -205,6 +207,7 @@ private:
 	float TyreAccum = 0.f;
 	float FlameAccum = 0.f;
 	int32 TyreSide = 0;
+	float MenuOrbitYaw = 0.f;
 	float EngineVolume = 0.f;
 
 	// Upgrade multipliers.
