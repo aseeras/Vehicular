@@ -16,10 +16,10 @@ event, which has a new arena layout, more rivals with better upgrades, and a hig
 
 ## Requirements
 
-- Unreal Engine **5.7** or newer, installed from the Epic Games Launcher.
+- Unreal Engine **5.8** or newer, installed from the Epic Games Launcher.
 - A C++ toolchain: Visual Studio 2022 with "Game development with C++" on Windows, or Xcode on macOS.
 
-The project file targets UE 5.7. If you have a newer engine, right-click `Vehicular.uproject` and choose
+The project file targets UE 5.8. If you have a newer engine, right-click `Vehicular.uproject` and choose
 **Switch Unreal Engine Version**.
 
 ## First-time setup

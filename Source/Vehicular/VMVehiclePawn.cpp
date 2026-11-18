@@ -222,7 +222,7 @@ void AVMVehiclePawn::ApplyUpgrades()
 
 void AVMVehiclePawn::UpdateEngineSound(float DeltaSeconds)
 {
-	const UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement();
+	UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement(); // GetThrottleInput() isn't const
 	if (!EngineAudio || !Move)
 	{
 		return;

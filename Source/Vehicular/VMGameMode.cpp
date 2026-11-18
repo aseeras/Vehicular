@@ -160,7 +160,7 @@ void AVMGameMode::SetupLocalPlayers()
 	if (bSplitScreen)
 	{
 		// With "P1 uses keyboard", the first gamepad drives P2 instead of P1.
-		UGameMapsSettings::SetSkipAssigningGamepadToPlayer1(Profile && Profile->bSplitP1Keyboard);
+		GetMutableDefault<UGameMapsSettings>()->SetSkipAssigningGamepadToPlayer1(Profile && Profile->bSplitP1Keyboard);
 		if (UGameViewportClient* Viewport = GetWorld()->GetGameViewport())
 		{
 			Viewport->SetForceDisableSplitscreen(false);
@@ -173,7 +173,7 @@ void AVMGameMode::SetupLocalPlayers()
 	}
 
 	// Single player: drop any extra local players left over from a split-screen match.
-	UGameMapsSettings::SetSkipAssigningGamepadToPlayer1(false);
+	GetMutableDefault<UGameMapsSettings>()->SetSkipAssigningGamepadToPlayer1(false);
 	const TArray<ULocalPlayer*> LocalPlayers = GI->GetLocalPlayers();
 	for (int32 i = LocalPlayers.Num() - 1; i >= 1; --i)
 	{
