@@ -101,6 +101,25 @@ split-screen setup screen.
 Career events rotate through the arenas in that order. Each event also gets its own random layout of
 props and pickups.
 
+## Building a Mac .dmg
+
+On a Mac with Unreal Engine and Xcode installed, after doing the first-time setup above (including the
+Vehicle content pack), run this from the repo root:
+
+```bash
+./Scripts/build_mac_dmg.sh
+```
+
+The script:
+
+1. finds your newest Unreal Engine install (set `UE_ROOT` to choose a different one)
+2. packages a Shipping build for macOS
+3. ad-hoc signs it
+4. writes `Build/VehicularManslaughter-Mac.dmg`
+
+The disk image contains the app and an Applications shortcut. The app isn't notarized, so on other Macs
+you open it the first time with right-click > Open.
+
 ## Controls
 
 | Action              | Keyboard        | Gamepad            |
