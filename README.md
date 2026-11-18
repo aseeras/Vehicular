@@ -10,6 +10,9 @@ Race, ram and run down pedestrians in a walled arena against five AI rivals. The
 
 You lose if the clock hits zero, your car is wrecked, or a rival finishes the race first.
 
+Every event earns **credits** to spend in the **garage** on upgrades. Winning moves you on to the next
+event, which has a new arena layout, more rivals with better upgrades, and a higher carnage target.
+
 ## Requirements
 
 - Unreal Engine **5.7** or newer, installed from the Epic Games Launcher.
@@ -50,7 +53,8 @@ startup from engine basic shapes. That arena includes:
 | Recover (flip back) | R               | Y                  |
 | Camera (chase/hood) | C               | Right stick click  |
 | Pause               | P               | Start              |
-| Restart (after match) | Enter         | Back               |
+| Continue / buy / start (menus) | Enter | A or Back     |
+| Garage menu up / down | ↑ ↓ or W / S  | D-pad             |
 
 ## Gameplay
 
@@ -73,6 +77,46 @@ startup from engine basic shapes. That arena includes:
 - **Rivals:** they race the checkpoints and switch to hunting you when you're close. They back off when badly
   damaged, use weapons, boost on straights and recover themselves when flipped. Each one has a coloured
   marker above the car.
+
+## Career and garage
+
+- The game opens in the **garage**. Choose **Start Event** to race.
+- After each match, press Enter or A to return to the garage.
+- **Credits earned:** your points ÷ 5, plus a win bonus of 1,000 + 250 × (event − 1).
+- Progress saves automatically to the `VehicularCareer` save slot. To start over, delete
+  `Saved/SaveGames/VehicularCareer.sav`.
+
+| Upgrade        | Effect per level                           |
+|----------------|--------------------------------------------|
+| Engine         | +10% engine torque                         |
+| Tyres          | +6% grip                                   |
+| Armour Plating | −8% damage taken                           |
+| Nitro Tank     | +20% boost duration, fuller starting tank  |
+| Ram Bar        | +12% ramming damage dealt                  |
+
+Each upgrade has 5 levels, costing 400, 900, 1,600, 2,500 and 3,600 credits.
+
+Winning moves you to the next event:
+
+- **New arena:** each event has a different layout of pillars and pickups.
+- **More rivals:** one extra rival every 2 events, up to 8.
+- **Stronger rivals:** rivals carry upgrades up to one level below your event's tier, and the tier rises
+  each event up to level 5.
+- **Higher target:** the carnage target rises by 2,500 points per event.
+
+## Sound
+
+All sound effects are synthesised in code at runtime, so the project needs no audio files. That includes:
+
+- the engine (pitch follows RPM, and the volume follows the throttle)
+- crashes and explosions
+- pedestrian yelps and squashes
+- pickups, the EMP, oil and nitro
+- countdown beeps, checkpoints, the win and lose stings, and garage sounds
+
+To replace any of them with your own assets, go to **Project Settings > Game > Vehicular Audio**. You can
+assign a Sound Wave or MetaSound to any effect or to the engine loop, and set the effects and engine
+volumes there too.
 
 ## Using your own assets
 
@@ -101,7 +145,10 @@ All the gameplay classes can be subclassed in Blueprint:
 | `VMCheckpoint` | Race gates |
 | `VMPickup`, `VMOilSlick` | Power-ups and the oil hazard |
 | `VMArenaBuilder` | Procedural default arena and lighting |
-| `VMHUD` | Canvas HUD (no UMG assets needed) |
+| `VMHUD` | Canvas HUD and garage screen (no UMG assets needed) |
+| `VMProfileSubsystem`, `VMSaveGame` | Career save: credits, upgrades, event progress |
+| `VMSoundSubsystem`, `VMSynth` | Procedural sound effects and engine audio |
+| `VMAudioSettings` | Project Settings page for replacing sounds |
 
 ## Status and next steps
 
@@ -110,8 +157,7 @@ compiled yet**. Expect a few small fixes on the first build, depending on your e
 
 Ideas for next steps:
 
-- sound effects
 - particle effects for sparks, smoke and fire
-- a front-end menu
-- a garage with persistent credits and upgrades between events
-- more arenas
+- a main menu with settings
+- unlockable vehicles
+- more arena types

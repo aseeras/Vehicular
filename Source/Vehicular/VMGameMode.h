@@ -63,6 +63,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Bonuses") int32 WreckPoints = 2500;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Bonuses") float WreckTimeBonus = 15.f;
 
+	/** Credits = points / this, plus a win bonus. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Career") int32 PointsPerCredit = 5;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Career") int32 WinCreditBonus = 1000;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Career") int32 WinCreditBonusPerEvent = 250;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Career") int32 MaxRivals = 8;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules|Career") int32 TargetPointsPerEvent = 2500;
+
 	/** Class used for rival cars. Set to a Blueprint subclass to give rivals your own mesh. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Classes") TSubclassOf<AVMVehiclePawn> RivalClass;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Classes") TSubclassOf<AVMPedestrian> PedestrianClass;
@@ -78,10 +85,26 @@ public:
 	void PushMessage(const FString& Text, const FLinearColor& Color = FLinearColor::White, float Duration = 3.f);
 	void RestartMatch();
 
+	// --- Garage ---
+	/** Confirm button: results -> garage; in the garage buys the selected upgrade or starts the event. */
+	void HandleConfirm();
+	void NavigateGarage(int32 Direction);
+	void OpenGarage();
+	int32 GetGarageSelection() const { return GarageSelection; }
+	/** Upgrades first, then the "start event" entry. */
+	int32 GetNumGarageItems() const { return VMUpgrades::NumUpgrades + 1; }
+	int32 GetCreditsEarned() const { return CreditsEarned; }
+	int32 GetEventNumber() const { return EventNumber; }
+	int32 GetRivalTier() const { return RivalTier; }
+	const FString& GetGarageNotice() const { return GarageNotice; }
+	/** Difficulty preview for an event number (used by the garage screen). */
+	void GetEventPreview(int32 InEvent, int32& OutRivals, int32& OutTier, int32& OutTarget) const;
+
 	// --- Queries ---
 	EVMMatchState GetMatchState() const { return State; }
 	bool IsRaceLive() const { return State == EVMMatchState::Racing; }
 	bool IsMatchOver() const { return State == EVMMatchState::Won || State == EVMMatchState::Lost; }
+	bool IsInGarage() const { return State == EVMMatchState::Garage; }
 	float GetTimeLeft() const { return TimeLeft; }
 	float GetCountdownLeft() const { return CountdownLeft; }
 	int32 GetPoints() const { return Points; }
@@ -103,6 +126,7 @@ public:
 
 private:
 	void EnsureArena();
+	void ConfigureEvent();
 	FTransform GetGridTransform(int32 Slot) const;
 	void SpawnRivals();
 	void SpawnPedestrian();
@@ -133,4 +157,14 @@ private:
 	int32 RivalsWrecked = 0;
 	int32 HighlightedCheckpoint = -1;
 	bool bArenaReady = false;
+	bool bEventConfigured = false;
+
+	int32 BaseNumRivals = 5;
+	int32 BaseTargetPoints = 15000;
+	int32 EventNumber = 1;
+	int32 RivalTier = 0;
+	int32 CreditsEarned = 0;
+	int32 GarageSelection = 0;
+	int32 LastCountdownBeep = -1;
+	FString GarageNotice;
 };

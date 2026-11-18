@@ -6,6 +6,8 @@
 #include "VMHUD.h"
 #include "VMPedestrian.h"
 #include "VMPlayerController.h"
+#include "VMProfileSubsystem.h"
+#include "VMSoundSubsystem.h"
 #include "VMRivalAIController.h"
 #include "VMUtil.h"
 #include "VMVehiclePawn.h"
@@ -57,6 +59,7 @@ void AVMGameMode::EnsureArena()
 		return;
 	}
 	bArenaReady = true;
+	ConfigureEvent();
 
 	UWorld* World = GetWorld();
 	Rng.Initialize(FMath::Rand());
@@ -70,7 +73,10 @@ void AVMGameMode::EnsureArena()
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Arena = World->SpawnActor<AVMArenaBuilder>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+		// Each event gets its own layout of pillars and pickups.
+		Arena = World->SpawnActorDeferred<AVMArenaBuilder>(AVMArenaBuilder::StaticClass(), FTransform::Identity, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Arena->RandomSeed = 1337 + 7919 * EventNumber;
+		Arena->FinishSpawning(FTransform::Identity);
 		Arena->Build();
 		Checkpoints = Arena->GetCheckpoints();
 	}
@@ -129,9 +135,19 @@ void AVMGameMode::StartPlay()
 	EnsureArena();
 	Super::StartPlay();
 
-	State = EVMMatchState::Countdown;
 	TimeLeft = StartingTime;
 	CountdownLeft = CountdownSeconds;
+
+	// Fresh launch opens the garage first; leaving the garage reloads the level straight into the race.
+	UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
+	if (Profile && !Profile->ConsumeSkipGarage())
+	{
+		OpenGarage();
+	}
+	else
+	{
+		State = EVMMatchState::Countdown;
+	}
 
 	SpawnRivals();
 	for (int32 i = 0; i < MaxPedestrians; ++i)
@@ -139,7 +155,10 @@ void AVMGameMode::StartPlay()
 		SpawnPedestrian();
 	}
 
-	PushMessage(FString::Printf(TEXT("Win: finish %d laps, wreck every rival, or score %d points"), NumLaps, TargetPoints), FLinearColor::White, 6.f);
+	if (State == EVMMatchState::Countdown)
+	{
+		PushMessage(FString::Printf(TEXT("EVENT %d - win: finish %d laps, wreck every rival, or score %d points"), EventNumber, NumLaps, TargetPoints), FLinearColor::White, 6.f);
+	}
 }
 
 void AVMGameMode::SpawnRivals()
@@ -158,6 +177,7 @@ void AVMGameMode::SpawnRivals()
 		Rival->bIsRival = true;
 		Rival->DriverName = RivalNames[i % NumRivalPresets];
 		Rival->SetBeaconColor(RivalColors[i % NumRivalPresets]);
+		Rival->Upgrades = FVMUpgradeLevels::Uniform(FMath::Clamp(RivalTier - Rng.RandRange(0, 1), 0, VMUpgrades::MaxLevel));
 		Rival->FinishSpawning(T);
 
 		FActorSpawnParameters Params;
@@ -238,10 +258,17 @@ void AVMGameMode::Tick(float DeltaSeconds)
 	if (State == EVMMatchState::Countdown)
 	{
 		CountdownLeft -= DeltaSeconds;
+		const int32 Second = FMath::CeilToInt(CountdownLeft);
+		if (Second > 0 && Second != LastCountdownBeep)
+		{
+			LastCountdownBeep = Second;
+			UVMSoundSubsystem::Play2D(this, EVMSound::CountdownBeep);
+		}
 		if (CountdownLeft <= 0.f)
 		{
 			CountdownLeft = 0.f;
 			State = EVMMatchState::Racing;
+			UVMSoundSubsystem::Play2D(this, EVMSound::Go);
 			PushMessage(TEXT("GO!"), Good, 1.5f);
 		}
 	}
@@ -318,6 +345,7 @@ void AVMGameMode::OnCheckpointReached(AVMVehiclePawn* Vehicle, int32 Index)
 
 	if (bIsPlayer)
 	{
+		UVMSoundSubsystem::Play2D(this, EVMSound::Checkpoint, 0.8f);
 		AddTime(CheckpointTimeBonus);
 		AddPoints(CheckpointPoints);
 		PushMessage(FString::Printf(TEXT("Checkpoint  +%.0fs"), CheckpointTimeBonus), Good);
@@ -436,6 +464,18 @@ void AVMGameMode::EndMatch(bool bWon, const FString& Reason)
 	}
 	State = bWon ? EVMMatchState::Won : EVMMatchState::Lost;
 	ResultText = Reason;
+
+	CreditsEarned = Points / FMath::Max(1, PointsPerCredit);
+	if (bWon)
+	{
+		CreditsEarned += WinCreditBonus + WinCreditBonusPerEvent * (EventNumber - 1);
+	}
+	if (UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		Profile->AwardCredits(CreditsEarned);
+		Profile->RecordEvent(bWon, Points);
+	}
+	UVMSoundSubsystem::Play2D(this, bWon ? EVMSound::Fanfare : EVMSound::Defeat);
 	UE_LOG(LogVehicular, Log, TEXT("Match over (%s): %s"), bWon ? TEXT("won") : TEXT("lost"), *Reason);
 }
 
@@ -443,6 +483,97 @@ void AVMGameMode::RestartMatch()
 {
 	const FString LevelPath = UWorld::RemovePIEPrefix(GetWorld()->GetOutermost()->GetName());
 	UGameplayStatics::OpenLevel(this, FName(*LevelPath));
+}
+
+// ------------------------------------------------------------------------------------------
+// Career and garage
+// ------------------------------------------------------------------------------------------
+
+void AVMGameMode::GetEventPreview(int32 InEvent, int32& OutRivals, int32& OutTier, int32& OutTarget) const
+{
+	const int32 Step = FMath::Max(1, InEvent) - 1;
+	OutRivals = FMath::Min(BaseNumRivals + Step / 2, MaxRivals);
+	OutTier = FMath::Min(Step, VMUpgrades::MaxLevel);
+	OutTarget = BaseTargetPoints + TargetPointsPerEvent * Step;
+}
+
+void AVMGameMode::ConfigureEvent()
+{
+	if (bEventConfigured)
+	{
+		return;
+	}
+	bEventConfigured = true;
+
+	BaseNumRivals = NumRivals;
+	BaseTargetPoints = TargetPoints;
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		EventNumber = Profile->GetEventNumber();
+	}
+	GetEventPreview(EventNumber, NumRivals, RivalTier, TargetPoints);
+}
+
+void AVMGameMode::OpenGarage()
+{
+	State = EVMMatchState::Garage;
+	GarageSelection = GetNumGarageItems() - 1; // start on "start event"
+	GarageNotice.Reset();
+	if (UGameplayStatics::IsGamePaused(this))
+	{
+		UGameplayStatics::SetGamePaused(this, false);
+	}
+}
+
+void AVMGameMode::NavigateGarage(int32 Direction)
+{
+	if (!IsInGarage())
+	{
+		return;
+	}
+	const int32 Count = GetNumGarageItems();
+	GarageSelection = (GarageSelection + Direction + Count) % Count;
+	GarageNotice.Reset();
+	UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove, 0.6f);
+}
+
+void AVMGameMode::HandleConfirm()
+{
+	if (IsMatchOver())
+	{
+		OpenGarage();
+		UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove);
+		return;
+	}
+	if (!IsInGarage())
+	{
+		return;
+	}
+
+	UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
+	if (GarageSelection < VMUpgrades::NumUpgrades)
+	{
+		const EVMUpgrade Upgrade = static_cast<EVMUpgrade>(GarageSelection);
+		if (Profile && Profile->TryPurchase(Upgrade))
+		{
+			UVMSoundSubsystem::Play2D(this, EVMSound::Purchase);
+			GarageNotice = FString::Printf(TEXT("%s upgraded to level %d"), *VMUpgrades::GetName(Upgrade), Profile->GetUpgradeLevel(Upgrade));
+		}
+		else
+		{
+			UVMSoundSubsystem::Play2D(this, EVMSound::Denied);
+			const bool bMaxed = Profile && Profile->GetNextUpgradeCost(Upgrade) < 0;
+			GarageNotice = bMaxed ? TEXT("Already at max level") : TEXT("Not enough credits");
+		}
+		return;
+	}
+
+	// Start the event: reload the level so the arena, rivals and upgrades are rebuilt.
+	if (Profile)
+	{
+		Profile->SetSkipGarageOnNextLoad(true);
+	}
+	RestartMatch();
 }
 
 // ------------------------------------------------------------------------------------------

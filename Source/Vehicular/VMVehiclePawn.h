@@ -13,6 +13,7 @@ class UVMDamageComponent;
 class UInputAction;
 class UInputMappingContext;
 class UChaosWheeledVehicleMovementComponent;
+class UAudioComponent;
 class AVMGameMode;
 struct FInputActionValue;
 
@@ -29,6 +30,7 @@ public:
 	AVMVehiclePawn(const FObjectInitializer& ObjectInitializer);
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
@@ -69,7 +71,7 @@ public:
 	float GetArmourTimeLeft() const { return ArmourTime; }
 	float GetSpikesTimeLeft() const { return SpikesTime; }
 	bool IsStunned() const { return StunTime > 0.f; }
-	float GetRamDamageMultiplier() const { return SpikesTime > 0.f ? 2.f : 1.f; }
+	float GetRamDamageMultiplier() const { return RamMultiplier * (SpikesTime > 0.f ? 2.f : 1.f); }
 	FVector GetLastFrameVelocity() const { return LastFrameVelocity; }
 	bool HasVehicleMesh() const;
 	UChaosWheeledVehicleMovementComponent* GetChaosMovement() const;
@@ -79,6 +81,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
 	bool bIsRival = false;
+
+	/** Garage upgrades. The player's are loaded from the career save; rivals get theirs from the game mode. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
+	FVMUpgradeLevels Upgrades;
 
 	/** Extra forward acceleration while boosting (cm/s^2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
@@ -132,6 +138,8 @@ private:
 	void FireEMP();
 	void DropOilSlick();
 	void ToggleCamera();
+	void ApplyUpgrades();
+	void UpdateEngineSound(float DeltaSeconds);
 	EVMDamageZone ZoneFromWorldPoint(const FVector& WorldPoint) const;
 
 	// Input (assets are built in code so the project needs no input assets)
@@ -144,6 +152,8 @@ private:
 	void OnRecoverInput();
 	void OnCameraInput();
 	void OnRestartInput();
+	void OnNavUpInput();
+	void OnNavDownInput();
 	void OnPauseInput();
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
@@ -156,6 +166,10 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> CameraAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> RestartAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> PauseAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> NavUpAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> NavDownAction;
+
+	UPROPERTY(Transient) TObjectPtr<UAudioComponent> EngineAudio;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> DebrisMesh;
 
@@ -173,6 +187,12 @@ private:
 	float RecoverCooldown = 0.f;
 	bool bHoodCamera = false;
 	bool bHandlingDirty = true;
+	bool bWasBoosting = false;
+	float EngineVolume = 0.f;
+
+	// Upgrade multipliers.
+	float ArmourMultiplier = 1.f;
+	float RamMultiplier = 1.f;
 
 	float BaseMaxTorque = 750.f;
 	float BaseFrontFriction = 3.f;

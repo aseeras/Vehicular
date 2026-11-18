@@ -30,8 +30,116 @@ enum class EVMMatchState : uint8
 	Countdown,
 	Racing,
 	Won,
-	Lost
+	Lost,
+	Garage
 };
+
+/** Procedurally synthesised sound effects (override any of them in Project Settings > Vehicular Audio). */
+UENUM(BlueprintType)
+enum class EVMSound : uint8
+{
+	ImpactLight,
+	ImpactHeavy,
+	Explosion,
+	Squash,
+	Yelp,
+	Pickup,
+	Checkpoint,
+	CountdownBeep,
+	Go,
+	EMP,
+	Oil,
+	Nitro,
+	Recover,
+	Purchase,
+	Denied,
+	MenuMove,
+	Fanfare,
+	Defeat
+};
+
+/** Garage upgrades bought with credits between events. */
+UENUM(BlueprintType)
+enum class EVMUpgrade : uint8
+{
+	Engine,
+	Tyres,
+	Armour,
+	NitroTank,
+	RamPlating,
+	Count UMETA(Hidden)
+};
+
+USTRUCT(BlueprintType)
+struct FVMUpgradeLevels
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Upgrades")
+	TArray<int32> Levels;
+
+	int32 Get(EVMUpgrade Upgrade) const
+	{
+		const int32 Index = static_cast<int32>(Upgrade);
+		return Levels.IsValidIndex(Index) ? Levels[Index] : 0;
+	}
+
+	void Set(EVMUpgrade Upgrade, int32 Level)
+	{
+		const int32 Index = static_cast<int32>(Upgrade);
+		if (Levels.Num() <= Index)
+		{
+			Levels.SetNumZeroed(Index + 1);
+		}
+		Levels[Index] = Level;
+	}
+
+	static FVMUpgradeLevels Uniform(int32 Level)
+	{
+		FVMUpgradeLevels Result;
+		Result.Levels.Init(Level, static_cast<int32>(EVMUpgrade::Count));
+		return Result;
+	}
+};
+
+namespace VMUpgrades
+{
+	constexpr int32 MaxLevel = 5;
+	constexpr int32 NumUpgrades = static_cast<int32>(EVMUpgrade::Count);
+
+	/** Price of buying the given level (1..MaxLevel). */
+	inline int32 CostForLevel(int32 Level)
+	{
+		static const int32 Costs[MaxLevel] = { 400, 900, 1600, 2500, 3600 };
+		return (Level >= 1 && Level <= MaxLevel) ? Costs[Level - 1] : -1;
+	}
+
+	inline FString GetName(EVMUpgrade Upgrade)
+	{
+		switch (Upgrade)
+		{
+		case EVMUpgrade::Engine:     return TEXT("ENGINE");
+		case EVMUpgrade::Tyres:      return TEXT("TYRES");
+		case EVMUpgrade::Armour:     return TEXT("ARMOUR PLATING");
+		case EVMUpgrade::NitroTank:  return TEXT("NITRO TANK");
+		case EVMUpgrade::RamPlating: return TEXT("RAM BAR");
+		default:                     return TEXT("-");
+		}
+	}
+
+	inline FString GetEffect(EVMUpgrade Upgrade)
+	{
+		switch (Upgrade)
+		{
+		case EVMUpgrade::Engine:     return TEXT("+10% engine torque per level");
+		case EVMUpgrade::Tyres:      return TEXT("+6% grip per level");
+		case EVMUpgrade::Armour:     return TEXT("-8% damage taken per level");
+		case EVMUpgrade::NitroTank:  return TEXT("+20% boost duration, fuller starting tank");
+		case EVMUpgrade::RamPlating: return TEXT("+12% ramming damage dealt per level");
+		default:                     return FString();
+		}
+	}
+}
 
 namespace VMPickups
 {

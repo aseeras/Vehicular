@@ -1,5 +1,6 @@
 #include "VMPedestrian.h"
 #include "VMGameMode.h"
+#include "VMSoundSubsystem.h"
 #include "VMUtil.h"
 #include "VMVehiclePawn.h"
 #include "AIController.h"
@@ -120,7 +121,13 @@ void AVMPedestrian::Tick(float DeltaSeconds)
 	}
 
 	UCharacterMovementComponent* Move = GetCharacterMovement();
-	if (PanicTime > 0.f)
+	const bool bPanicking = PanicTime > 0.f;
+	if (bPanicking && !bWasPanicking && FMath::FRand() < 0.35f)
+	{
+		UVMSoundSubsystem::PlayAt(this, EVMSound::Yelp, GetActorLocation(), 0.7f, FMath::FRandRange(0.8f, 1.35f));
+	}
+	bWasPanicking = bPanicking;
+	if (bPanicking)
 	{
 		Move->MaxWalkSpeed = RunSpeed;
 		AddMovementInput(FleeDirection);
@@ -178,6 +185,7 @@ void AVMPedestrian::Knockdown(AVMVehiclePawn* Killer)
 		Part->AddAngularImpulseInDegrees(FMath::VRand() * 720.f, NAME_None, true);
 	}
 	Splat->SetVisibility(true);
+	UVMSoundSubsystem::PlayAt(this, EVMSound::Squash, GetActorLocation(), 0.9f, FMath::FRandRange(0.85f, 1.2f));
 
 	if (AVMGameMode* GM = GetWorld()->GetAuthGameMode<AVMGameMode>())
 	{

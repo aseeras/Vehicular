@@ -47,5 +47,6 @@ private:
 	float ThinkTimer = 0.f;
 	float PanicTime = 0.f;
 	float JukeSign = 1.f;
+	bool bWasPanicking = false;
 	bool bDead = false;
 };

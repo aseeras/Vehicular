@@ -3,6 +3,7 @@
 #include "VMDamageComponent.h"
 #include "VMGameMode.h"
 #include "VMVehiclePawn.h"
+#include "VMProfileSubsystem.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -85,6 +86,11 @@ void AVMHUD::DrawHUD()
 	AVMVehiclePawn* Car = Cast<AVMVehiclePawn>(GetOwningPawn());
 	if (!GM)
 	{
+		return;
+	}
+	if (GM->IsInGarage())
+	{
+		DrawGarage(GM);
 		return;
 	}
 
@@ -256,16 +262,10 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 		Label(FString::FromInt(FMath::CeilToInt(GM->GetCountdownLeft())), CX, CY, FLinearColor(1.f, 0.85f, 0.2f), 6.f, true);
 		break;
 	case EVMMatchState::Won:
-		Label(TEXT("VICTORY"), CX, CY, FLinearColor(0.3f, 1.f, 0.35f), 5.f, true);
-		Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
-		Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), GM->GetPoints(), GM->GetPedestriansKilled(), GM->GetRivalsWrecked()), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
-		Label(TEXT("Press Enter / Back to play again"), CX, CY + 190.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+		DrawResults(GM, true);
 		break;
 	case EVMMatchState::Lost:
-		Label(TEXT("DEFEAT"), CX, CY, FLinearColor(1.f, 0.2f, 0.15f), 5.f, true);
-		Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
-		Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), GM->GetPoints(), GM->GetPedestriansKilled(), GM->GetRivalsWrecked()), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
-		Label(TEXT("Press Enter / Back to play again"), CX, CY + 190.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+		DrawResults(GM, false);
 		break;
 	default:
 		break;
@@ -275,4 +275,88 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 	{
 		Label(TEXT("PAUSED"), CX, CY, FLinearColor::White, 4.f, true);
 	}
+}
+
+void AVMHUD::DrawResults(AVMGameMode* GM, bool bWon)
+{
+	const float CX = Canvas->ClipX * 0.5f;
+	const float CY = Canvas->ClipY * 0.4f;
+	Label(bWon ? TEXT("VICTORY") : TEXT("DEFEAT"), CX, CY, bWon ? FLinearColor(0.3f, 1.f, 0.35f) : FLinearColor(1.f, 0.2f, 0.15f), 5.f, true);
+	Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
+	Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), GM->GetPoints(), GM->GetPedestriansKilled(), GM->GetRivalsWrecked()), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
+	Label(FString::Printf(TEXT("+%d credits"), GM->GetCreditsEarned()), CX, CY + 185.f * S, FLinearColor(0.4f, 0.9f, 1.f), 1.6f, true);
+	Label(TEXT("Press Enter / A for the garage"), CX, CY + 240.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+}
+
+void AVMHUD::DrawGarage(AVMGameMode* GM)
+{
+	const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
+	if (!Profile)
+	{
+		return;
+	}
+
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	DrawRect(FLinearColor(0.02f, 0.02f, 0.03f, 0.88f), 0.f, 0.f, W, H);
+
+	const float Left = W * 0.5f - 520.f * S;
+	const float PanelW = 1040.f * S;
+	const int32 Event = Profile->GetEventNumber();
+
+	Label(TEXT("GARAGE"), W * 0.5f, 90.f * S, FLinearColor(1.f, 0.55f, 0.1f), 4.f, true);
+	Label(FString::Printf(TEXT("CREDITS  %d"), Profile->GetCredits()), Left, 160.f * S, FLinearColor(0.4f, 0.9f, 1.f), 2.f);
+	Label(FString::Printf(TEXT("Events won %d   Best score %d"), Profile->GetEventsWon(), Profile->GetBestPoints()), Left + PanelW - 380.f * S, 172.f * S, FLinearColor(0.7f, 0.7f, 0.7f), 1.1f);
+
+	const float RowH = 78.f * S;
+	float Y = 240.f * S;
+	for (int32 i = 0; i < GM->GetNumGarageItems(); ++i)
+	{
+		const bool bSelected = i == GM->GetGarageSelection();
+		DrawRect(bSelected ? FLinearColor(1.f, 0.55f, 0.1f, 0.25f) : FLinearColor(1.f, 1.f, 1.f, 0.05f), Left, Y, PanelW, RowH - 8.f * S);
+		if (bSelected)
+		{
+			DrawRect(FLinearColor(1.f, 0.55f, 0.1f), Left, Y, 6.f * S, RowH - 8.f * S);
+		}
+
+		if (i < VMUpgrades::NumUpgrades)
+		{
+			const EVMUpgrade Upgrade = static_cast<EVMUpgrade>(i);
+			const int32 Level = Profile->GetUpgradeLevel(Upgrade);
+			const int32 Cost = Profile->GetNextUpgradeCost(Upgrade);
+
+			Label(VMUpgrades::GetName(Upgrade), Left + 24.f * S, Y + 8.f * S, FLinearColor::White, 1.5f);
+			Label(VMUpgrades::GetEffect(Upgrade), Left + 24.f * S, Y + 42.f * S, FLinearColor(0.65f, 0.65f, 0.65f), 0.95f);
+
+			// Level pips.
+			const float PipX = Left + 560.f * S;
+			for (int32 Pip = 0; Pip < VMUpgrades::MaxLevel; ++Pip)
+			{
+				DrawRect(Pip < Level ? FLinearColor(1.f, 0.55f, 0.1f) : FLinearColor(0.25f, 0.25f, 0.25f), PipX + Pip * 34.f * S, Y + 22.f * S, 26.f * S, 26.f * S);
+			}
+
+			FString CostText = TEXT("MAXED");
+			FLinearColor CostColor(0.5f, 0.5f, 0.5f);
+			if (Cost >= 0)
+			{
+				CostText = FString::Printf(TEXT("%d cr"), Cost);
+				CostColor = Profile->GetCredits() >= Cost ? FLinearColor(0.4f, 1.f, 0.45f) : FLinearColor(1.f, 0.3f, 0.25f);
+			}
+			Label(CostText, Left + PanelW - 170.f * S, Y + 20.f * S, CostColor, 1.4f);
+		}
+		else
+		{
+			int32 Rivals, Tier, Target;
+			GM->GetEventPreview(Event, Rivals, Tier, Target);
+			Label(FString::Printf(TEXT("START EVENT %d  >"), Event), Left + 24.f * S, Y + 8.f * S, FLinearColor(0.3f, 1.f, 0.35f), 1.6f);
+			Label(FString::Printf(TEXT("%d rivals   rival upgrade tier %d   carnage target %d"), Rivals, Tier, Target), Left + 24.f * S, Y + 44.f * S, FLinearColor(0.75f, 0.75f, 0.75f), 0.95f);
+		}
+		Y += RowH;
+	}
+
+	if (!GM->GetGarageNotice().IsEmpty())
+	{
+		Label(GM->GetGarageNotice(), W * 0.5f, Y + 30.f * S, FLinearColor(1.f, 0.85f, 0.3f), 1.3f, true);
+	}
+	Label(TEXT("Up / Down to choose     Enter / A to buy or start"), W * 0.5f, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.1f, true);
 }

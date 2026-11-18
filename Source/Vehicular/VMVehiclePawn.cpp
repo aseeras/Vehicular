@@ -3,6 +3,9 @@
 #include "VMDamageComponent.h"
 #include "VMGameMode.h"
 #include "VMOilSlick.h"
+#include "VMProfileSubsystem.h"
+#include "VMSoundSubsystem.h"
+#include "VMAudioSettings.h"
 #include "VMRivalAIController.h"
 #include "VMUtil.h"
 #include "VMWheels.h"
@@ -11,6 +14,7 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Engine/CollisionProfile.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
@@ -141,6 +145,20 @@ void AVMVehiclePawn::BeginPlay()
 	BaseRearFriction = GetDefault<UVMWheelRear>()->FrictionForceMultiplier;
 	BaseSteerAngle = GetDefault<UVMWheelFront>()->MaxSteerAngle;
 
+	if (!bIsRival)
+	{
+		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+		{
+			Upgrades = Profile->GetUpgrades();
+		}
+	}
+	ApplyUpgrades();
+
+	if (UVMSoundSubsystem* Sound = UVMSoundSubsystem::Get(this))
+	{
+		EngineAudio = Sound->CreateEngineLoop(GetMesh());
+	}
+
 	Beacon->SetVisibility(bIsRival);
 	VMUtil::Paint(Beacon, BeaconColor);
 
@@ -163,6 +181,49 @@ AVMGameMode* AVMVehiclePawn::GetVMGameMode() const
 bool AVMVehiclePawn::HasVehicleMesh() const
 {
 	return GetMesh() && GetMesh()->GetSkeletalMeshAsset() != nullptr;
+}
+
+void AVMVehiclePawn::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (EngineAudio)
+	{
+		EngineAudio->Stop();
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void AVMVehiclePawn::ApplyUpgrades()
+{
+	const int32 EngineLvl = Upgrades.Get(EVMUpgrade::Engine);
+	const int32 TyreLvl = Upgrades.Get(EVMUpgrade::Tyres);
+	const int32 ArmourLvl = Upgrades.Get(EVMUpgrade::Armour);
+	const int32 NitroLvl = Upgrades.Get(EVMUpgrade::NitroTank);
+	const int32 RamLvl = Upgrades.Get(EVMUpgrade::RamPlating);
+
+	BaseMaxTorque *= 1.f + 0.10f * EngineLvl;
+	BaseFrontFriction *= 1.f + 0.06f * TyreLvl;
+	BaseRearFriction *= 1.f + 0.06f * TyreLvl;
+	ArmourMultiplier = 1.f - 0.08f * ArmourLvl;
+	NitroDuration *= 1.f + 0.2f * NitroLvl;
+	NitroCharge = FMath::Min(1.f, 0.5f + 0.1f * NitroLvl);
+	RamMultiplier = 1.f + 0.12f * RamLvl;
+	bHandlingDirty = true;
+}
+
+void AVMVehiclePawn::UpdateEngineSound(float DeltaSeconds)
+{
+	const UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement();
+	if (!EngineAudio || !Move)
+	{
+		return;
+	}
+	const float MaxRPM = FMath::Max(1.f, Move->GetEngineMaxRotationSpeed());
+	const float RPMFraction = FMath::Clamp(Move->GetEngineRotationSpeed() / MaxRPM, 0.f, 1.f);
+	EngineAudio->SetPitchMultiplier(0.6f + 1.4f * RPMFraction + (bWasBoosting ? 0.15f : 0.f));
+
+	const float TargetVolume = IsWrecked() ? 0.f : 0.35f + 0.45f * FMath::Abs(Move->GetThrottleInput()) + (bWasBoosting ? 0.2f : 0.f);
+	EngineVolume = FMath::FInterpTo(EngineVolume, TargetVolume, DeltaSeconds, 6.f);
+	EngineAudio->SetVolumeMultiplier(EngineVolume * GetDefault<UVMAudioSettings>()->EngineVolume);
 }
 
 bool AVMVehiclePawn::IsWrecked() const
@@ -208,18 +269,25 @@ void AVMVehiclePawn::Tick(float DeltaSeconds)
 			bHandlingDirty = true;
 		}
 	}
-	Damage->DamageTakenMultiplier = ArmourTime > 0.f ? 0.4f : 1.f;
+	Damage->DamageTakenMultiplier = ArmourMultiplier * (ArmourTime > 0.f ? 0.4f : 1.f);
 
 	if (IsPlayerControlled())
 	{
 		SetDriveInput(PlayerThrottle, PlayerSteer, bPlayerHandbrake);
 	}
 
-	if (bNitroHeld && NitroCharge > 0.f && CanDrive() && !IsStunned())
+	const bool bBoosting = bNitroHeld && NitroCharge > 0.f && CanDrive() && !IsStunned();
+	if (bBoosting)
 	{
 		GetMesh()->AddForce(GetActorForwardVector() * NitroAcceleration, NAME_None, /*bAccelChange*/ true);
 		NitroCharge = FMath::Max(0.f, NitroCharge - DeltaSeconds / NitroDuration);
+		if (!bWasBoosting)
+		{
+			UVMSoundSubsystem::PlayAt(this, EVMSound::Nitro, GetActorLocation(), 0.8f);
+		}
 	}
+	bWasBoosting = bBoosting;
+	UpdateEngineSound(DeltaSeconds);
 
 	if (bHandlingDirty)
 	{
@@ -358,6 +426,9 @@ void AVMVehiclePawn::OnChassisHit(UPrimitiveComponent* HitComp, AActor* OtherAct
 	const float Applied = Damage->ApplyZoneDamage(ZoneFromWorldPoint(Hit.ImpactPoint), Amount, OtherActor);
 	if (Applied > 0.f)
 	{
+		const bool bHeavy = Applied > 12.f;
+		UVMSoundSubsystem::PlayAt(this, bHeavy ? EVMSound::ImpactHeavy : EVMSound::ImpactLight, Hit.ImpactPoint,
+			FMath::Clamp(0.4f + Applied / 30.f, 0.4f, 1.f), FMath::FRandRange(0.85f, 1.15f));
 		SpawnDebris(Hit.ImpactPoint, Applied > 15.f ? 3 : 1, 400.f);
 		if (AVMGameMode* GM = GetVMGameMode())
 		{
@@ -387,6 +458,11 @@ void AVMVehiclePawn::OnPartBroken(EVMDamageZone Zone, int32 Stage)
 void AVMVehiclePawn::OnWrecked(AActor* FinalBlowCauser)
 {
 	bNitroHeld = false;
+	UVMSoundSubsystem::PlayAt(this, EVMSound::Explosion, GetActorLocation(), 1.f, FMath::FRandRange(0.9f, 1.1f));
+	if (EngineAudio)
+	{
+		EngineAudio->FadeOut(0.5f, 0.f);
+	}
 	GetMesh()->AddImpulse(FVector(0.f, 0.f, 700.f), NAME_None, true);
 	GetMesh()->AddAngularImpulseInDegrees(FVector(FMath::FRandRange(-200.f, 200.f), FMath::FRandRange(-200.f, 200.f), 0.f), NAME_None, true);
 	SpawnDebris(GetActorLocation() + FVector(0.f, 0.f, 80.f), 10, 1200.f);
@@ -445,6 +521,7 @@ void AVMVehiclePawn::ReceivePickup(EVMPickupType Type)
 	case EVMPickupType::OilSlick:  HeldPickup = Type; break;
 	default: break;
 	}
+	UVMSoundSubsystem::PlayAt(this, EVMSound::Pickup, GetActorLocation(), bIsRival ? 0.5f : 0.9f);
 	if (!bIsRival)
 	{
 		if (AVMGameMode* GM = GetVMGameMode())
@@ -474,6 +551,7 @@ void AVMVehiclePawn::UseHeldPickup()
 void AVMVehiclePawn::FireEMP()
 {
 	AVMGameMode* GM = GetVMGameMode();
+	UVMSoundSubsystem::PlayAt(this, EVMSound::EMP, GetActorLocation());
 	int32 Hits = 0;
 	for (TActorIterator<AVMVehiclePawn> It(GetWorld()); It; ++It)
 	{
@@ -510,6 +588,7 @@ void AVMVehiclePawn::DropOilSlick()
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	GetWorld()->SpawnActor<AVMOilSlick>(Loc, FRotator(0.f, GetActorRotation().Yaw, 0.f), Params);
+	UVMSoundSubsystem::PlayAt(this, EVMSound::Oil, Loc);
 }
 
 void AVMVehiclePawn::ApplyStun(float Seconds)
@@ -544,6 +623,7 @@ void AVMVehiclePawn::Recover()
 	SetActorLocationAndRotation(GetActorLocation() + FVector(0.f, 0.f, 150.f), Upright, false, nullptr, ETeleportType::TeleportPhysics);
 	GetMesh()->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	GetMesh()->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	UVMSoundSubsystem::PlayAt(this, EVMSound::Recover, GetActorLocation(), 0.7f);
 
 	if (!bIsRival)
 	{
@@ -613,6 +693,8 @@ void AVMVehiclePawn::BuildInputAssets()
 	RestartAction = MakeAction(this, TEXT("IA_Restart"), EInputActionValueType::Boolean);
 	PauseAction = MakeAction(this, TEXT("IA_Pause"), EInputActionValueType::Boolean);
 	PauseAction->bTriggerWhenPaused = true;
+	NavUpAction = MakeAction(this, TEXT("IA_NavUp"), EInputActionValueType::Boolean);
+	NavDownAction = MakeAction(this, TEXT("IA_NavDown"), EInputActionValueType::Boolean);
 
 	InputContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Vehicle"));
 
@@ -641,6 +723,13 @@ void AVMVehiclePawn::BuildInputAssets()
 	InputContext->MapKey(CameraAction, EKeys::Gamepad_RightThumbstick);
 	InputContext->MapKey(RestartAction, EKeys::Enter);
 	InputContext->MapKey(RestartAction, EKeys::Gamepad_Special_Left);
+	InputContext->MapKey(RestartAction, EKeys::Gamepad_FaceButton_Bottom);
+	InputContext->MapKey(NavUpAction, EKeys::Up);
+	InputContext->MapKey(NavUpAction, EKeys::W);
+	InputContext->MapKey(NavUpAction, EKeys::Gamepad_DPad_Up);
+	InputContext->MapKey(NavDownAction, EKeys::Down);
+	InputContext->MapKey(NavDownAction, EKeys::S);
+	InputContext->MapKey(NavDownAction, EKeys::Gamepad_DPad_Down);
 	InputContext->MapKey(PauseAction, EKeys::P);
 	InputContext->MapKey(PauseAction, EKeys::Gamepad_Special_Right);
 }
@@ -682,6 +771,8 @@ void AVMVehiclePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	Input->BindAction(CameraAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnCameraInput);
 	Input->BindAction(RestartAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnRestartInput);
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnPauseInput);
+	Input->BindAction(NavUpAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavUpInput);
+	Input->BindAction(NavDownAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavDownInput);
 }
 
 void AVMVehiclePawn::OnThrottleInput(const FInputActionValue& Value) { PlayerThrottle = Value.Get<float>(); }
@@ -696,17 +787,30 @@ void AVMVehiclePawn::OnRestartInput()
 {
 	if (AVMGameMode* GM = GetVMGameMode())
 	{
-		if (GM->IsMatchOver())
-		{
-			GM->RestartMatch();
-		}
+		GM->HandleConfirm();
+	}
+}
+
+void AVMVehiclePawn::OnNavUpInput()
+{
+	if (AVMGameMode* GM = GetVMGameMode())
+	{
+		GM->NavigateGarage(-1);
+	}
+}
+
+void AVMVehiclePawn::OnNavDownInput()
+{
+	if (AVMGameMode* GM = GetVMGameMode())
+	{
+		GM->NavigateGarage(1);
 	}
 }
 
 void AVMVehiclePawn::OnPauseInput()
 {
 	const AVMGameMode* GM = GetVMGameMode();
-	if (GM && GM->IsMatchOver())
+	if (GM && (GM->IsMatchOver() || GM->IsInGarage()))
 	{
 		return;
 	}

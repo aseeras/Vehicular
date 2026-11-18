@@ -30,6 +30,8 @@ private:
 	void DrawCheckpointMarker(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawRivalTags(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car);
+	void DrawGarage(AVMGameMode* GM);
+	void DrawResults(AVMGameMode* GM, bool bWon);
 
 	float S = 1.f;
 	UFont* Font = nullptr;
