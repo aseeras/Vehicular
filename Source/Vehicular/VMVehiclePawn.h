@@ -90,6 +90,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
 	FName CarId;
 
+	/** Set by the game mode when it hands out CarId and Upgrades, so the career save isn't read. */
+	UPROPERTY(BlueprintReadWrite, Category = "Vehicular")
+	bool bLoadoutAssigned = false;
+
+	/** Show the coloured roof marker on a human car (split-screen player colours). */
+	UPROPERTY(BlueprintReadWrite, Category = "Vehicular")
+	bool bShowBeacon = false;
+
 	/** Extra forward acceleration while boosting (cm/s^2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
 	float NitroAcceleration = 1500.f;

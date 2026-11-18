@@ -85,7 +85,8 @@ void AVMRivalAIController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	AVMVehiclePawn* Player = GM->GetPlayerVehicle();
+	// Hunt whichever human is closest (matters in split-screen).
+	AVMVehiclePawn* Player = GM->GetNearestHuman(Car->GetActorLocation());
 
 	// Self-righting.
 	if (Car->IsUpsideDown())

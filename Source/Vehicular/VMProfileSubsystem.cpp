@@ -18,6 +18,13 @@ void UVMProfileSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Profile = Cast<UVMSaveGame>(UGameplayStatics::CreateSaveGameObject(UVMSaveGame::StaticClass()));
 	}
 	EnsureStarterCar();
+
+	// Default split-screen cars: a different one for each player.
+	const TArray<FVMCarDefinition>& Cars = UVMCarCatalog::GetCars();
+	for (int32 i = 0; i < 4; ++i)
+	{
+		SplitCars.Add(Cars.Num() > 0 ? Cars[i % Cars.Num()].Id : NAME_None);
+	}
 }
 
 void UVMProfileSubsystem::EnsureStarterCar()

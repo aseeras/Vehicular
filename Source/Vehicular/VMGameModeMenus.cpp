@@ -60,6 +60,26 @@ namespace
 	}
 
 	constexpr int32 MaxQuickDifficulty = 8;
+
+	/** Split-screen setup rows; the car rows depend on the player count. */
+	enum class ESplitRow : uint8 { Players, Arena, Car1, Car2, Car3, Car4, Rivals, Difficulty, Keyboard, Start, Back };
+
+	TArray<ESplitRow> SplitRows(const UVMProfileSubsystem* Profile)
+	{
+		const int32 Players = Profile ? FMath::Clamp(Profile->SplitPlayers, 2, 4) : 2;
+		TArray<ESplitRow> Rows = { ESplitRow::Players, ESplitRow::Arena };
+		for (int32 i = 0; i < Players; ++i)
+		{
+			Rows.Add(static_cast<ESplitRow>(static_cast<int32>(ESplitRow::Car1) + i));
+		}
+		Rows.Append({ ESplitRow::Rivals, ESplitRow::Difficulty, ESplitRow::Keyboard, ESplitRow::Start, ESplitRow::Back });
+		return Rows;
+	}
+
+	int32 CarIndexOf(FName Id)
+	{
+		return FMath::Max(0, UVMCarCatalog::GetCars().IndexOfByPredicate([Id](const FVMCarDefinition& Car) { return Car.Id == Id; }));
+	}
 }
 
 bool AVMGameMode::IsPauseMenuOpen() const
@@ -82,14 +102,19 @@ void AVMGameMode::OpenMainMenu(EVMMenuScreen Screen)
 		{
 		case EVMMenuScreen::ConfirmNewCareer: Selection = 1; break;
 		case EVMMenuScreen::QuickRace:        Selection = 2; break;
-		case EVMMenuScreen::Settings:         Selection = 3; break;
-		case EVMMenuScreen::Controls:         Selection = 4; break;
+		case EVMMenuScreen::SplitScreen:      Selection = 3; break;
+		case EVMMenuScreen::Settings:         Selection = 4; break;
+		case EVMMenuScreen::Controls:         Selection = 5; break;
 		default: break;
 		}
 	}
 	else if (Screen == EVMMenuScreen::QuickRace)
 	{
 		Selection = 3; // "start race"
+	}
+	else if (Screen == EVMMenuScreen::SplitScreen)
+	{
+		Selection = SplitRows(UVMProfileSubsystem::Get(this)).IndexOfByKey(ESplitRow::Start);
 	}
 
 	State = EVMMatchState::Menu;
@@ -145,7 +170,7 @@ void AVMGameMode::GetMenuRows(TArray<FVMMenuRow>& OutRows) const
 	if (IsPauseMenuOpen())
 	{
 		Row(TEXT("RESUME"));
-		Row(bQuickRace ? TEXT("RESTART RACE") : TEXT("RESTART EVENT"));
+		Row(bQuickRace || bSplitScreen ? TEXT("RESTART RACE") : TEXT("RESTART EVENT"));
 		Row(TEXT("QUIT TO MAIN MENU"));
 		return;
 	}
@@ -158,6 +183,7 @@ void AVMGameMode::GetMenuRows(TArray<FVMMenuRow>& OutRows) const
 		Row(TEXT("CAREER"), FString::Printf(TEXT("Event %d - %s"), Event, *VMArenas::GetName(GetArenaForEvent(Event))));
 		Row(TEXT("NEW CAREER"));
 		Row(TEXT("QUICK RACE"));
+		Row(TEXT("SPLIT-SCREEN"), TEXT("2-4 players"));
 		Row(TEXT("SETTINGS"));
 		Row(TEXT("CONTROLS"));
 		Row(TEXT("QUIT"));
@@ -173,6 +199,30 @@ void AVMGameMode::GetMenuRows(TArray<FVMMenuRow>& OutRows) const
 		Row(TEXT("RIVAL DIFFICULTY"), FString::Printf(TEXT("%d / %d"), Profile ? Profile->QuickDifficulty : 1, MaxQuickDifficulty), true);
 		Row(TEXT("START RACE"));
 		Row(TEXT("BACK"));
+		break;
+	case EVMMenuScreen::SplitScreen:
+		for (ESplitRow Id : SplitRows(Profile))
+		{
+			switch (Id)
+			{
+			case ESplitRow::Players:    Row(TEXT("PLAYERS"), FString::FromInt(Profile ? Profile->SplitPlayers : 2), true); break;
+			case ESplitRow::Arena:      Row(TEXT("ARENA"), Profile ? VMArenas::GetName(Profile->SplitArena) : FString(), true); break;
+			case ESplitRow::Car1:
+			case ESplitRow::Car2:
+			case ESplitRow::Car3:
+			case ESplitRow::Car4:
+			{
+				const int32 P = static_cast<int32>(Id) - static_cast<int32>(ESplitRow::Car1);
+				Row(FString::Printf(TEXT("P%d CAR"), P + 1), Profile && Profile->SplitCars.IsValidIndex(P) ? CarName(Profile->SplitCars[P]) : FString(), true);
+				break;
+			}
+			case ESplitRow::Rivals:     Row(TEXT("AI RIVALS"), FString::FromInt(Profile ? Profile->SplitRivals : 3), true); break;
+			case ESplitRow::Difficulty: Row(TEXT("RIVAL DIFFICULTY"), FString::Printf(TEXT("%d / %d"), Profile ? Profile->SplitDifficulty : 1, MaxQuickDifficulty), true); break;
+			case ESplitRow::Keyboard:   Row(TEXT("P1 CONTROLS"), Profile && Profile->bSplitP1Keyboard ? TEXT("KEYBOARD") : TEXT("GAMEPAD 1"), true); break;
+			case ESplitRow::Start:      Row(TEXT("START MATCH")); break;
+			case ESplitRow::Back:       Row(TEXT("BACK")); break;
+			}
+		}
 		break;
 	case EVMMenuScreen::Settings:
 	{
@@ -212,9 +262,10 @@ void AVMGameMode::ActivateMenuRow()
 			}
 			OpenMainMenu(EVMMenuScreen::QuickRace);
 			break;
-		case 3: Click(); OpenMainMenu(EVMMenuScreen::Settings); break;
-		case 4: Click(); OpenMainMenu(EVMMenuScreen::Controls); break;
-		case 5:
+		case 3: Click(); OpenMainMenu(EVMMenuScreen::SplitScreen); break;
+		case 4: Click(); OpenMainMenu(EVMMenuScreen::Settings); break;
+		case 5: Click(); OpenMainMenu(EVMMenuScreen::Controls); break;
+		case 6:
 			UKismetSystemLibrary::QuitGame(this, UGameplayStatics::GetPlayerController(this, 0), EQuitPreference::Quit, false);
 			break;
 		default: break;
@@ -255,6 +306,30 @@ void AVMGameMode::ActivateMenuRow()
 			AdjustMenuRow(1);
 		}
 		break;
+
+	case EVMMenuScreen::SplitScreen:
+	{
+		const TArray<ESplitRow> Rows = SplitRows(Profile);
+		const ESplitRow Id = Rows.IsValidIndex(MenuSelection) ? Rows[MenuSelection] : ESplitRow::Back;
+		if (Id == ESplitRow::Start)
+		{
+			if (Profile)
+			{
+				Profile->SetNextLoadIntent(EVMLoadIntent::SplitScreen);
+			}
+			RestartMatch();
+		}
+		else if (Id == ESplitRow::Back)
+		{
+			Click();
+			OpenMainMenu();
+		}
+		else
+		{
+			AdjustMenuRow(1);
+		}
+		break;
+	}
 
 	case EVMMenuScreen::Settings:
 		if (MenuSelection == 6)
@@ -310,6 +385,57 @@ void AVMGameMode::AdjustMenuRow(int32 Direction)
 		default: break;
 		}
 	}
+	else if (MenuScreen == EVMMenuScreen::SplitScreen)
+	{
+		const TArray<ESplitRow> Rows = SplitRows(Profile);
+		if (!Rows.IsValidIndex(MenuSelection))
+		{
+			return;
+		}
+		const ESplitRow Id = Rows[MenuSelection];
+		const TArray<FVMCarDefinition>& Cars = UVMCarCatalog::GetCars();
+		switch (Id)
+		{
+		case ESplitRow::Players:
+			Profile->SplitPlayers = 2 + ((FMath::Clamp(Profile->SplitPlayers, 2, 4) - 2 + Direction + 3) % 3);
+			bChanged = true;
+			break;
+		case ESplitRow::Arena:
+			Profile->SplitArena = static_cast<EVMArena>((static_cast<int32>(Profile->SplitArena) + Direction + VMArenas::Num) % VMArenas::Num);
+			bChanged = true;
+			break;
+		case ESplitRow::Car1:
+		case ESplitRow::Car2:
+		case ESplitRow::Car3:
+		case ESplitRow::Car4:
+		{
+			// Party mode: every car is available, owned or not.
+			const int32 P = static_cast<int32>(Id) - static_cast<int32>(ESplitRow::Car1);
+			if (Profile->SplitCars.IsValidIndex(P) && Cars.Num() > 0)
+			{
+				Profile->SplitCars[P] = Cars[(CarIndexOf(Profile->SplitCars[P]) + Direction + Cars.Num()) % Cars.Num()].Id;
+				bChanged = true;
+			}
+			break;
+		}
+		case ESplitRow::Rivals:
+			Profile->SplitRivals = FMath::Clamp(Profile->SplitRivals + Direction, 0, MaxRivals);
+			bChanged = true;
+			break;
+		case ESplitRow::Difficulty:
+			Profile->SplitDifficulty = FMath::Clamp(Profile->SplitDifficulty + Direction, 1, MaxQuickDifficulty);
+			bChanged = true;
+			break;
+		case ESplitRow::Keyboard:
+			Profile->bSplitP1Keyboard = !Profile->bSplitP1Keyboard;
+			bChanged = true;
+			break;
+		default:
+			break;
+		}
+		// Keep the cursor in range if the player count shrank.
+		MenuSelection = FMath::Min(MenuSelection, SplitRows(Profile).Num() - 1);
+	}
 	else if (MenuScreen == EVMMenuScreen::Settings)
 	{
 		const float Step = 0.1f * Direction;
@@ -360,7 +486,7 @@ void AVMGameMode::ActivatePauseRow()
 		UGameplayStatics::SetGamePaused(this, false);
 		if (Profile)
 		{
-			Profile->SetNextLoadIntent(bQuickRace ? EVMLoadIntent::QuickRace : EVMLoadIntent::CareerRace);
+			Profile->SetNextLoadIntent(bSplitScreen ? EVMLoadIntent::SplitScreen : bQuickRace ? EVMLoadIntent::QuickRace : EVMLoadIntent::CareerRace);
 		}
 		RestartMatch();
 		break;

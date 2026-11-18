@@ -18,6 +18,10 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameMapsSettings.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/GameViewportClient.h"
 
 namespace
 {
@@ -50,23 +54,138 @@ AActor* AVMGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
 	// The player can spawn before StartPlay, so make sure the arena and start grid exist.
 	EnsureArena();
-	return Super::ChoosePlayerStart_Implementation(Player);
+	if (!bSplitScreen)
+	{
+		return Super::ChoosePlayerStart_Implementation(Player);
+	}
+
+	// Split-screen: each local player gets their own slot on the grid.
+	const int32 Slot = FMath::Clamp(LocalIndexOf(Player), 0, 3);
+	if (const TObjectPtr<AActor>* Existing = SplitStarts.Find(Slot))
+	{
+		if (IsValid(*Existing))
+		{
+			return *Existing;
+		}
+	}
+	const FTransform T = GetGridTransform(Slot);
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	APlayerStart* Start = GetWorld()->SpawnActor<APlayerStart>(T.GetLocation(), T.Rotator(), Params);
+	SplitStarts.Add(Slot, Start);
+	return Start;
+}
+
+int32 AVMGameMode::LocalIndexOf(const AController* Controller) const
+{
+	const APlayerController* PC = Cast<APlayerController>(Controller);
+	const UGameInstance* GI = GetGameInstance();
+	if (!PC || !PC->GetLocalPlayer() || !GI)
+	{
+		return 0;
+	}
+	return FMath::Max(0, GI->GetLocalPlayers().IndexOfByKey(PC->GetLocalPlayer()));
+}
+
+FName AVMGameMode::HumanCarId(int32 LocalIndex) const
+{
+	const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
+	if (!Profile)
+	{
+		return NAME_None;
+	}
+	if (bSplitScreen && Profile->SplitCars.IsValidIndex(LocalIndex))
+	{
+		return Profile->SplitCars[LocalIndex];
+	}
+	return Profile->GetSelectedCar();
 }
 
 UClass* AVMGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
 {
 	// A car can name its own Blueprint (with a custom mesh); otherwise use the default pawn.
-	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	EnsureArena();
+	if (const FVMCarDefinition* Car = UVMCarCatalog::Find(HumanCarId(LocalIndexOf(InController))))
 	{
-		if (const FVMCarDefinition* Car = UVMCarCatalog::Find(Profile->GetSelectedCar()))
+		if (UClass* Custom = Car->PawnClass.LoadSynchronous())
 		{
-			if (UClass* Custom = Car->PawnClass.LoadSynchronous())
-			{
-				return Custom;
-			}
+			return Custom;
 		}
 	}
 	return Super::GetDefaultPawnClassForController_Implementation(InController);
+}
+
+APawn* AVMGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
+{
+	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
+	if (!PawnClass || !PawnClass->IsChildOf(AVMVehiclePawn::StaticClass()))
+	{
+		return Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, SpawnTransform);
+	}
+
+	// Hand each human their car and loadout before BeginPlay runs.
+	const int32 Index = LocalIndexOf(NewPlayer);
+	AVMVehiclePawn* Car = GetWorld()->SpawnActorDeferred<AVMVehiclePawn>(PawnClass, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+	if (!Car)
+	{
+		return nullptr;
+	}
+	Car->CarId = HumanCarId(Index);
+	Car->bLoadoutAssigned = true;
+	if (bSplitScreen)
+	{
+		// Party mode: everyone starts on equal footing, no garage upgrades.
+		Car->Upgrades = FVMUpgradeLevels();
+		Car->DriverName = FString::Printf(TEXT("P%d"), Index + 1);
+		Car->bShowBeacon = true;
+		Car->SetBeaconColor(GetPlayerColor(Index + 1));
+	}
+	else if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		Car->Upgrades = Profile->GetUpgrades();
+	}
+	Car->FinishSpawning(SpawnTransform);
+	return Car;
+}
+
+void AVMGameMode::SetupLocalPlayers()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+	const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
+
+	if (bSplitScreen)
+	{
+		// With "P1 uses keyboard", the first gamepad drives P2 instead of P1.
+		UGameMapsSettings::SetSkipAssigningGamepadToPlayer1(Profile && Profile->bSplitP1Keyboard);
+		if (UGameViewportClient* Viewport = GetWorld()->GetGameViewport())
+		{
+			Viewport->SetForceDisableSplitscreen(false);
+		}
+		for (int32 i = GI->GetNumLocalPlayers(); i < NumHumans; ++i)
+		{
+			UGameplayStatics::CreatePlayer(this, i, true);
+		}
+		return;
+	}
+
+	// Single player: drop any extra local players left over from a split-screen match.
+	UGameMapsSettings::SetSkipAssigningGamepadToPlayer1(false);
+	const TArray<ULocalPlayer*> LocalPlayers = GI->GetLocalPlayers();
+	for (int32 i = LocalPlayers.Num() - 1; i >= 1; --i)
+	{
+		if (APlayerController* PC = LocalPlayers[i]->GetPlayerController(GetWorld()))
+		{
+			UGameplayStatics::RemovePlayer(PC, true);
+		}
+		else
+		{
+			GI->RemoveLocalPlayer(LocalPlayers[i]);
+		}
+	}
 }
 
 void AVMGameMode::EnsureArena()
@@ -160,9 +279,15 @@ void AVMGameMode::StartPlay()
 	// A fresh launch opens the main menu; starting a race from a menu reloads the level into the race.
 	UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this);
 	const EVMLoadIntent Intent = Profile ? Profile->ConsumeLoadIntent() : EVMLoadIntent::CareerRace;
+	SetupLocalPlayers();
 	if (Intent == EVMLoadIntent::MainMenu)
 	{
-		OpenMainMenu();
+		const bool bBackToSplit = Profile && Profile->bReturnToSplitMenu;
+		if (Profile)
+		{
+			Profile->bReturnToSplitMenu = false;
+		}
+		OpenMainMenu(bBackToSplit ? EVMMenuScreen::SplitScreen : EVMMenuScreen::Main);
 	}
 	else
 	{
@@ -177,7 +302,8 @@ void AVMGameMode::StartPlay()
 
 	if (State == EVMMatchState::Countdown)
 	{
-		const FString Title = bQuickRace ? TEXT("QUICK RACE") : FString::Printf(TEXT("EVENT %d"), EventNumber);
+		const FString Title = bSplitScreen ? FString::Printf(TEXT("%d-PLAYER SPLIT-SCREEN"), NumHumans)
+			: bQuickRace ? FString(TEXT("QUICK RACE")) : FString::Printf(TEXT("EVENT %d"), EventNumber);
 		PushMessage(FString::Printf(TEXT("%s: %s - finish %d laps, wreck every rival, or score %d points"), *Title, *VMArenas::GetName(CurrentArena), NumLaps, TargetPoints), FLinearColor::White, 6.f);
 	}
 }
@@ -197,7 +323,7 @@ void AVMGameMode::SpawnRivals()
 			Class = RivalClass ? RivalClass.Get() : AVMVehiclePawn::StaticClass();
 		}
 
-		const FTransform T = GetGridTransform(i + 1);
+		const FTransform T = GetGridTransform(i + NumHumans);
 		AVMVehiclePawn* Rival = World->SpawnActorDeferred<AVMVehiclePawn>(Class, T, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Rival)
 		{
@@ -304,29 +430,43 @@ void AVMGameMode::Tick(float DeltaSeconds)
 	}
 	else if (State == EVMMatchState::Racing)
 	{
-		TimeLeft -= DeltaSeconds;
-		if (TimeLeft <= 0.f)
+		if (!bSplitScreen)
 		{
-			TimeLeft = 0.f;
-			EndMatch(false, TEXT("Out of time"));
+			TimeLeft -= DeltaSeconds;
+			if (TimeLeft <= 0.f)
+			{
+				TimeLeft = 0.f;
+				EndMatch(nullptr, TEXT("Out of time"));
+			}
 		}
-		if (GetWorld()->GetTimeSeconds() - LastKillTime > ComboWindow)
+		const double Now = GetWorld()->GetTimeSeconds();
+		for (TPair<TObjectPtr<AVMVehiclePawn>, FVMPlayerStats>& Pair : HumanStats)
 		{
-			Combo = 0;
+			if (Now - Pair.Value.LastKillTime > ComboWindow)
+			{
+				Pair.Value.Combo = 0;
+			}
 		}
 	}
 
 	MaintainPedestrians(DeltaSeconds);
 
-	// Light up the gate the player should head for.
-	const AVMCheckpoint* Next = GetNextCheckpointFor(GetPlayerVehicle());
-	const int32 NextIndex = Next ? Checkpoints.IndexOfByKey(Next) : -1;
-	if (NextIndex != HighlightedCheckpoint)
+	// Light up the gates the human players should head for.
+	int32 Mask = 0;
+	for (const AVMVehiclePawn* Human : GetHumanVehicles())
 	{
-		HighlightedCheckpoint = NextIndex;
-		for (int32 i = 0; i < Checkpoints.Num(); ++i)
+		const int32 NextIndex = Checkpoints.IndexOfByKey(GetNextCheckpointFor(Human));
+		if (NextIndex >= 0 && NextIndex < 32)
 		{
-			Checkpoints[i]->SetHighlighted(i == NextIndex);
+			Mask |= 1 << NextIndex;
+		}
+	}
+	if (Mask != HighlightMask)
+	{
+		HighlightMask = Mask;
+		for (int32 i = 0; i < Checkpoints.Num() && i < 32; ++i)
+		{
+			Checkpoints[i]->SetHighlighted((Mask & (1 << i)) != 0);
 		}
 	}
 }
@@ -350,168 +490,195 @@ void AVMGameMode::OnCheckpointReached(AVMVehiclePawn* Vehicle, int32 Index)
 		return;
 	}
 
-	const bool bIsPlayer = Vehicle == GetPlayerVehicle();
+	const bool bHuman = IsHuman(Vehicle);
 	if (SlotIndex == 0)
 	{
 		++P.LapsCompleted;
 		if (P.LapsCompleted >= NumLaps)
 		{
-			if (bIsPlayer)
-			{
-				EndMatch(true, TEXT("You won the race"));
-			}
-			else
-			{
-				EndMatch(false, FString::Printf(TEXT("%s won the race"), *Vehicle->DriverName));
-			}
+			const bool bSolo = bHuman && !bSplitScreen;
+			EndMatch(Vehicle, bSolo ? FString(TEXT("You won the race")) : FString::Printf(TEXT("%s won the race"), *Vehicle->DriverName));
 			return;
 		}
-		if (bIsPlayer)
+		if (bHuman)
 		{
-			PushMessage(FString::Printf(TEXT("LAP %d / %d"), P.LapsCompleted + 1, NumLaps), Good);
+			PushMessage(FString::Printf(TEXT("LAP %d / %d"), P.LapsCompleted + 1, NumLaps), Good, 3.f, Vehicle);
 		}
 	}
 	P.NextCheckpoint = (SlotIndex + 1) % N;
 
-	if (bIsPlayer)
+	if (bHuman)
 	{
-		UVMSoundSubsystem::Play2D(this, EVMSound::Checkpoint, 0.8f);
+		UVMSoundSubsystem::PlayAt(this, EVMSound::Checkpoint, Vehicle->GetActorLocation(), 0.8f);
 		AddTime(CheckpointTimeBonus);
-		AddPoints(CheckpointPoints);
-		PushMessage(FString::Printf(TEXT("Checkpoint  +%.0fs"), CheckpointTimeBonus), Good);
+		AddPoints(Vehicle, CheckpointPoints);
+		PushMessage(bSplitScreen ? FString::Printf(TEXT("Checkpoint  +%d"), CheckpointPoints) : FString::Printf(TEXT("Checkpoint  +%.0fs"), CheckpointTimeBonus), Good, 3.f, Vehicle);
 	}
 }
 
 void AVMGameMode::OnPedestrianKilled(AVMPedestrian* Pedestrian, AVMVehiclePawn* Killer)
 {
-	if (!Killer || Killer != GetPlayerVehicle() || !IsRaceLive())
+	if (!IsHuman(Killer) || !IsRaceLive())
 	{
 		return;
 	}
 
+	FVMPlayerStats& Stats = HumanStats.FindOrAdd(Killer);
 	const double Now = GetWorld()->GetTimeSeconds();
-	Combo = (Now - LastKillTime <= ComboWindow) ? FMath::Min(Combo + 1, 10) : 1;
-	LastKillTime = Now;
-	++PedestriansKilled;
+	Stats.Combo = (Now - Stats.LastKillTime <= ComboWindow) ? FMath::Min(Stats.Combo + 1, 10) : 1;
+	Stats.LastKillTime = Now;
+	++Stats.PedestriansKilled;
 
-	const int32 Earned = PedestrianPoints * Combo;
+	const int32 Earned = PedestrianPoints * Stats.Combo;
 	AddTime(PedestrianTimeBonus);
-	AddPoints(Earned);
-	PushMessage(Combo > 1
-		? FString::Printf(TEXT("Pedestrian! x%d combo  +%d"), Combo, Earned)
-		: FString::Printf(TEXT("Pedestrian!  +%d"), Earned), Carnage);
+	PushMessage(Stats.Combo > 1
+		? FString::Printf(TEXT("Pedestrian! x%d combo  +%d"), Stats.Combo, Earned)
+		: FString::Printf(TEXT("Pedestrian!  +%d"), Earned), Carnage, 3.f, Killer);
+	AddPoints(Killer, Earned);
 }
 
 void AVMGameMode::OnVehicleDamaged(AVMVehiclePawn* Victim, AVMVehiclePawn* Attacker, float Amount)
 {
-	if (!IsRaceLive() || !Attacker || Attacker == Victim || Attacker != GetPlayerVehicle() || Amount <= 0.f)
+	if (!IsRaceLive() || !IsHuman(Attacker) || Attacker == Victim || Amount <= 0.f)
 	{
 		return;
 	}
 	const int32 Earned = FMath::RoundToInt(Amount * PointsPerDamage);
 	AddTime(Amount * TimePerDamage);
-	AddPoints(Earned);
 	if (Amount >= 10.f)
 	{
-		PushMessage(FString::Printf(TEXT("Smashed %s  +%d"), *Victim->DriverName, Earned), Carnage, 2.f);
+		PushMessage(FString::Printf(TEXT("Smashed %s  +%d"), *Victim->DriverName, Earned), Carnage, 2.f, Attacker);
 	}
+	AddPoints(Attacker, Earned);
 }
 
 void AVMGameMode::OnVehicleWrecked(AVMVehiclePawn* Victim, AVMVehiclePawn* Attacker)
 {
-	if (!Victim)
+	if (!Victim || IsMatchOver())
 	{
 		return;
 	}
 
-	if (Victim == GetPlayerVehicle())
+	if (IsHuman(Attacker) && Attacker != Victim)
 	{
-		EndMatch(false, TEXT("Your car is scrap"));
-		return;
-	}
-
-	++RivalsWrecked;
-	if (Attacker && Attacker == GetPlayerVehicle())
-	{
+		++HumanStats.FindOrAdd(Attacker).Wrecks;
 		AddTime(WreckTimeBonus);
-		AddPoints(WreckPoints);
-		PushMessage(FString::Printf(TEXT("WRECKED %s!  +%d"), *Victim->DriverName, WreckPoints), Carnage, 4.f);
-	}
-	else
-	{
-		PushMessage(FString::Printf(TEXT("%s is out"), *Victim->DriverName), FLinearColor(0.8f, 0.8f, 0.8f));
+		PushMessage(FString::Printf(TEXT("WRECKED %s!  +%d"), *Victim->DriverName, WreckPoints), Carnage, 4.f, Attacker);
+		AddPoints(Attacker, WreckPoints);
+		if (IsMatchOver())
+		{
+			return;
+		}
 	}
 
-	const bool bAllWrecked = !Rivals.ContainsByPredicate([](const TObjectPtr<AVMVehiclePawn>& R)
+	const bool bVictimHuman = IsHuman(Victim);
+	if (bVictimHuman && !bSplitScreen)
 	{
-		return IsValid(R) && !R->IsWrecked();
-	});
-	if (bAllWrecked && Rivals.Num() > 0)
+		EndMatch(nullptr, TEXT("Your car is scrap"));
+		return;
+	}
+	PushMessage(FString::Printf(TEXT("%s is out"), *Victim->DriverName), bVictimHuman ? Bad : FLinearColor(0.8f, 0.8f, 0.8f));
+
+	TArray<AVMVehiclePawn*> Alive = GetAllVehicles().FilterByPredicate([](const AVMVehiclePawn* V) { return !V->IsWrecked(); });
+
+	if (!bSplitScreen)
 	{
-		EndMatch(true, TEXT("Every rival wrecked"));
+		const bool bRivalsLeft = Alive.ContainsByPredicate([this](const AVMVehiclePawn* V) { return !IsHuman(V); });
+		if (!bRivalsLeft && Rivals.Num() > 0)
+		{
+			EndMatch(GetPlayerVehicle(), TEXT("Every rival wrecked"));
+		}
+		return;
+	}
+
+	// Split-screen: last car standing wins; if every human is out, nobody does.
+	const TArray<AVMVehiclePawn*> AliveHumans = Alive.FilterByPredicate([this](const AVMVehiclePawn* V) { return IsHuman(V); });
+	if (AliveHumans.Num() == 0)
+	{
+		AVMVehiclePawn* Leader = nullptr;
+		for (AVMVehiclePawn* Human : GetHumanVehicles())
+		{
+			if (!Leader || GetStatsFor(Human).Points > GetStatsFor(Leader).Points)
+			{
+				Leader = Human;
+			}
+		}
+		EndMatch(nullptr, Leader ? FString::Printf(TEXT("Every player wrecked - %s scored the most"), *Leader->DriverName) : FString(TEXT("Every player wrecked")));
+	}
+	else if (Alive.Num() == 1)
+	{
+		EndMatch(Alive[0], FString::Printf(TEXT("%s is the last car standing"), *Alive[0]->DriverName));
 	}
 }
 
 void AVMGameMode::AddTime(float Seconds)
 {
-	if (IsMatchOver())
+	// Split-screen matches have no clock.
+	if (IsMatchOver() || bSplitScreen)
 	{
 		return;
 	}
 	TimeLeft = FMath::Max(0.f, TimeLeft + Seconds);
 }
 
-void AVMGameMode::AddPoints(int32 Amount)
+void AVMGameMode::AddPoints(AVMVehiclePawn* Who, int32 Amount)
 {
-	if (IsMatchOver())
+	if (IsMatchOver() || !Who)
 	{
 		return;
 	}
-	Points += Amount;
-	if (IsRaceLive() && Points >= TargetPoints)
+	FVMPlayerStats& Stats = HumanStats.FindOrAdd(Who);
+	Stats.Points += Amount;
+	if (IsRaceLive() && Stats.Points >= TargetPoints)
 	{
-		EndMatch(true, FString::Printf(TEXT("Carnage target reached: %d points"), Points));
+		EndMatch(Who, bSplitScreen
+			? FString::Printf(TEXT("%s hit the carnage target"), *Who->DriverName)
+			: FString::Printf(TEXT("Carnage target reached: %d points"), Stats.Points));
 	}
 }
 
-void AVMGameMode::PushMessage(const FString& Text, const FLinearColor& Color, float Duration)
+void AVMGameMode::PushMessage(const FString& Text, const FLinearColor& Color, float Duration, AVMVehiclePawn* Target)
 {
 	FVMFeedMessage& Msg = Messages.AddDefaulted_GetRef();
 	Msg.Text = Text;
 	Msg.Color = Color;
 	Msg.TimeLeft = Duration;
-	if (Messages.Num() > 7)
+	Msg.Target = Target;
+	if (Messages.Num() > 12)
 	{
 		Messages.RemoveAt(0);
 	}
 }
 
-void AVMGameMode::EndMatch(bool bWon, const FString& Reason)
+void AVMGameMode::EndMatch(AVMVehiclePawn* InWinner, const FString& Reason)
 {
 	if (IsMatchOver())
 	{
 		return;
 	}
-	State = bWon ? EVMMatchState::Won : EVMMatchState::Lost;
+	Winner = InWinner;
+	const bool bHumanWon = IsHuman(InWinner);
+	State = bHumanWon ? EVMMatchState::Won : EVMMatchState::Lost;
 	ResultText = Reason;
 
-	// Quick races are just for fun: no credits, no career progress.
+	// Only solo career races pay credits and advance the career.
 	CreditsEarned = 0;
-	if (!bQuickRace)
+	if (!bQuickRace && !bSplitScreen)
 	{
+		const int32 Points = GetStatsFor(GetPlayerVehicle()).Points;
 		CreditsEarned = Points / FMath::Max(1, PointsPerCredit);
-		if (bWon)
+		if (bHumanWon)
 		{
 			CreditsEarned += WinCreditBonus + WinCreditBonusPerEvent * (EventNumber - 1);
 		}
 		if (UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
 		{
 			Profile->AwardCredits(CreditsEarned);
-			Profile->RecordEvent(bWon, Points);
+			Profile->RecordEvent(bHumanWon, Points);
 		}
 	}
-	UVMSoundSubsystem::Play2D(this, bWon ? EVMSound::Fanfare : EVMSound::Defeat);
-	UE_LOG(LogVehicular, Log, TEXT("Match over (%s): %s"), bWon ? TEXT("won") : TEXT("lost"), *Reason);
+	UVMSoundSubsystem::Play2D(this, bHumanWon ? EVMSound::Fanfare : EVMSound::Defeat);
+	UE_LOG(LogVehicular, Log, TEXT("Match over: %s"), *Reason);
 }
 
 void AVMGameMode::RestartMatch()
@@ -544,11 +711,29 @@ void AVMGameMode::ConfigureEvent()
 	BaseTargetPoints = TargetPoints;
 	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
 	{
-		bQuickRace = Profile->PeekLoadIntent() == EVMLoadIntent::QuickRace;
-		EventNumber = bQuickRace ? Profile->QuickDifficulty : Profile->GetEventNumber();
-		CurrentArena = bQuickRace ? Profile->QuickArena : GetArenaForEvent(EventNumber);
+		const EVMLoadIntent Intent = Profile->PeekLoadIntent();
+		bQuickRace = Intent == EVMLoadIntent::QuickRace;
+		bSplitScreen = Intent == EVMLoadIntent::SplitScreen;
+		if (bSplitScreen)
+		{
+			NumHumans = FMath::Clamp(Profile->SplitPlayers, 2, 4);
+			EventNumber = Profile->SplitDifficulty;
+			CurrentArena = Profile->SplitArena;
+		}
+		else
+		{
+			EventNumber = bQuickRace ? Profile->QuickDifficulty : Profile->GetEventNumber();
+			CurrentArena = bQuickRace ? Profile->QuickArena : GetArenaForEvent(EventNumber);
+		}
 	}
 	GetEventPreview(EventNumber, NumRivals, RivalTier, TargetPoints);
+	if (bSplitScreen)
+	{
+		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+		{
+			NumRivals = FMath::Clamp(Profile->SplitRivals, 0, MaxRivals);
+		}
+	}
 }
 
 void AVMGameMode::OpenGarage()
@@ -628,6 +813,17 @@ void AVMGameMode::HandleConfirm()
 	}
 	if (IsMatchOver())
 	{
+		if (bSplitScreen)
+		{
+			// Reload to drop the extra players and get back to the split-screen setup.
+			if (UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+			{
+				Profile->bReturnToSplitMenu = true;
+				Profile->SetNextLoadIntent(EVMLoadIntent::MainMenu);
+			}
+			RestartMatch();
+			return;
+		}
 		if (bQuickRace)
 		{
 			OpenMainMenu(EVMMenuScreen::QuickRace);
@@ -708,13 +904,69 @@ AVMVehiclePawn* AVMGameMode::GetPlayerVehicle() const
 	return Cast<AVMVehiclePawn>(UGameplayStatics::GetPlayerPawn(this, 0));
 }
 
-TArray<AVMVehiclePawn*> AVMGameMode::GetAllVehicles() const
+TArray<AVMVehiclePawn*> AVMGameMode::GetHumanVehicles() const
 {
 	TArray<AVMVehiclePawn*> Result;
-	if (AVMVehiclePawn* Player = GetPlayerVehicle())
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
-		Result.Add(Player);
+		if (AVMVehiclePawn* Car = Cast<AVMVehiclePawn>(It->Get() ? It->Get()->GetPawn() : nullptr))
+		{
+			Result.Add(Car);
+		}
 	}
+	return Result;
+}
+
+bool AVMGameMode::IsHuman(const AVMVehiclePawn* Vehicle) const
+{
+	return Vehicle && Vehicle->IsPlayerControlled();
+}
+
+int32 AVMGameMode::GetPlayerNumber(const AVMVehiclePawn* Vehicle) const
+{
+	return IsHuman(Vehicle) ? LocalIndexOf(Vehicle->GetController()) + 1 : 0;
+}
+
+AVMVehiclePawn* AVMGameMode::GetNearestHuman(const FVector& Location) const
+{
+	AVMVehiclePawn* Best = nullptr;
+	float BestDist = TNumericLimits<float>::Max();
+	for (AVMVehiclePawn* Human : GetHumanVehicles())
+	{
+		const float Dist = FVector::DistSquared(Human->GetActorLocation(), Location);
+		if (!Human->IsWrecked() && Dist < BestDist)
+		{
+			BestDist = Dist;
+			Best = Human;
+		}
+	}
+	return Best;
+}
+
+FLinearColor AVMGameMode::GetPlayerColor(int32 PlayerNumber)
+{
+	switch (PlayerNumber)
+	{
+	case 1:  return FLinearColor(0.15f, 0.55f, 1.f);
+	case 2:  return FLinearColor(1.f, 0.2f, 0.15f);
+	case 3:  return FLinearColor(0.2f, 1.f, 0.3f);
+	case 4:  return FLinearColor(1.f, 0.85f, 0.1f);
+	default: return FLinearColor::White;
+	}
+}
+
+FVMPlayerStats AVMGameMode::GetStatsFor(const AVMVehiclePawn* Vehicle) const
+{
+	if (const FVMPlayerStats* Stats = HumanStats.Find(const_cast<AVMVehiclePawn*>(Vehicle)))
+	{
+		return *Stats;
+	}
+	return FVMPlayerStats();
+}
+
+TArray<AVMVehiclePawn*> AVMGameMode::GetAllVehicles() const
+{
+	TArray<AVMVehiclePawn*> Result = GetHumanVehicles();
 	for (const TObjectPtr<AVMVehiclePawn>& Rival : Rivals)
 	{
 		if (IsValid(Rival))

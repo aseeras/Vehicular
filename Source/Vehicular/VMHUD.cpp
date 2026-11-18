@@ -80,7 +80,8 @@ void AVMHUD::DrawHUD()
 		return;
 	}
 
-	S = Canvas->ClipY / 1080.f;
+	// Split-screen views are smaller; scale to whichever axis shrank most.
+	S = FMath::Max(0.5f, FMath::Min(Canvas->ClipX / 1920.f, Canvas->ClipY / 1080.f));
 	Font = GEngine->GetLargeFont();
 
 	AVMGameMode* GM = GetWorld()->GetAuthGameMode<AVMGameMode>();
@@ -107,23 +108,34 @@ void AVMHUD::DrawHUD()
 		DrawBottomLeft(Car);
 		DrawDamage(Car);
 	}
-	DrawTopLeft(GM);
+	DrawTopLeft(GM, Car);
 	DrawTopRight(GM, Car);
-	DrawFeed(GM);
+	DrawFeed(GM, Car);
 	DrawCenter(GM, Car);
 }
 
-void AVMHUD::DrawTopLeft(AVMGameMode* GM)
+void AVMHUD::DrawTopLeft(AVMGameMode* GM, AVMVehiclePawn* Car)
 {
 	const float X = 40.f * S;
-	const float TimeLeft = GM->GetTimeLeft();
-	const FLinearColor TimeColor = TimeLeft < 10.f ? FLinearColor(1.f, 0.2f, 0.2f) : FLinearColor::White;
-	Label(FString::Printf(TEXT("%d:%02d"), FMath::FloorToInt(TimeLeft / 60.f), FMath::FloorToInt(FMath::Fmod(TimeLeft, 60.f))), X, 30.f * S, TimeColor, 3.f);
-	Label(FString::Printf(TEXT("POINTS  %d / %d"), GM->GetPoints(), GM->TargetPoints), X, 110.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.4f);
-	Label(FString::Printf(TEXT("Pedestrians %d   Wrecks %d / %d"), GM->GetPedestriansKilled(), GM->GetRivalsWrecked(), GM->GetRivals().Num()), X, 150.f * S, FLinearColor(0.85f, 0.85f, 0.85f), 1.1f);
-	if (GM->GetCombo() > 1)
+	const FVMPlayerStats Stats = GM->GetStatsFor(Car);
+	if (GM->IsSplitScreen())
 	{
-		Label(FString::Printf(TEXT("COMBO x%d"), GM->GetCombo()), X, 185.f * S, FLinearColor(1.f, 0.45f, 0.1f), 1.6f);
+		// No clock in split-screen; show the player tag in their colour instead.
+		const int32 Number = GM->GetPlayerNumber(Car);
+		Label(FString::Printf(TEXT("P%d"), Number), X, 30.f * S, AVMGameMode::GetPlayerColor(Number), 3.f);
+	}
+	else
+	{
+		const float TimeLeft = GM->GetTimeLeft();
+		const FLinearColor TimeColor = TimeLeft < 10.f ? FLinearColor(1.f, 0.2f, 0.2f) : FLinearColor::White;
+		Label(FString::Printf(TEXT("%d:%02d"), FMath::FloorToInt(TimeLeft / 60.f), FMath::FloorToInt(FMath::Fmod(TimeLeft, 60.f))), X, 30.f * S, TimeColor, 3.f);
+	}
+	const int32 Opponents = FMath::Max(0, GM->GetAllVehicles().Num() - 1);
+	Label(FString::Printf(TEXT("POINTS  %d / %d"), Stats.Points, GM->TargetPoints), X, 110.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.4f);
+	Label(FString::Printf(TEXT("Pedestrians %d   Wrecks %d / %d"), Stats.PedestriansKilled, Stats.Wrecks, Opponents), X, 150.f * S, FLinearColor(0.85f, 0.85f, 0.85f), 1.1f);
+	if (Stats.Combo > 1)
+	{
+		Label(FString::Printf(TEXT("COMBO x%d"), Stats.Combo), X, 185.f * S, FLinearColor(1.f, 0.45f, 0.1f), 1.6f);
 	}
 }
 
@@ -193,11 +205,16 @@ void AVMHUD::DrawDamage(AVMVehiclePawn* Car)
 	Label(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Dmg->GetTotalFraction() * 100.f)), CX, CY, HealthColor(Dmg->GetTotalFraction()), 1.2f, true);
 }
 
-void AVMHUD::DrawFeed(AVMGameMode* GM)
+void AVMHUD::DrawFeed(AVMGameMode* GM, AVMVehiclePawn* Car)
 {
 	float Y = Canvas->ClipY * 0.32f;
 	for (const FVMFeedMessage& Msg : GM->GetMessages())
 	{
+		// Skip messages meant for another player.
+		if (Msg.Target.IsValid() && Msg.Target.Get() != Car)
+		{
+			continue;
+		}
 		FLinearColor C = Msg.Color;
 		C.A = FMath::Clamp(Msg.TimeLeft, 0.f, 1.f);
 		Label(Msg.Text, 40.f * S, Y, C, 1.2f);
@@ -230,9 +247,10 @@ void AVMHUD::DrawCheckpointMarker(AVMGameMode* GM, AVMVehiclePawn* Car)
 
 void AVMHUD::DrawRivalTags(AVMGameMode* GM, AVMVehiclePawn* Car)
 {
-	for (const TObjectPtr<AVMVehiclePawn>& Rival : GM->GetRivals())
+	// Tags over every other car: rivals and, in split-screen, the other players.
+	for (AVMVehiclePawn* Rival : GM->GetAllVehicles())
 	{
-		if (!IsValid(Rival) || FVector::Dist(Rival->GetActorLocation(), Car->GetActorLocation()) > 9000.f)
+		if (Rival == Car || !IsValid(Rival) || FVector::Dist(Rival->GetActorLocation(), Car->GetActorLocation()) > 9000.f)
 		{
 			continue;
 		}
@@ -247,7 +265,8 @@ void AVMHUD::DrawRivalTags(AVMGameMode* GM, AVMVehiclePawn* Car)
 			continue;
 		}
 		const float Health = Rival->GetDamage()->GetTotalFraction();
-		Label(Rival->DriverName, Screen.X, Screen.Y - 14.f * S, FLinearColor::White, 0.9f, true);
+		const int32 Number = GM->GetPlayerNumber(Rival);
+		Label(Rival->DriverName, Screen.X, Screen.Y - 14.f * S, Number > 0 ? AVMGameMode::GetPlayerColor(Number) : FLinearColor::White, Number > 0 ? 1.1f : 0.9f, true);
 		Bar(Screen.X - 40.f * S, Screen.Y + 4.f * S, 80.f * S, 7.f * S, Health, HealthColor(Health));
 	}
 }
@@ -268,10 +287,8 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 		Label(FString::FromInt(FMath::CeilToInt(GM->GetCountdownLeft())), CX, CY, FLinearColor(1.f, 0.85f, 0.2f), 6.f, true);
 		break;
 	case EVMMatchState::Won:
-		DrawResults(GM, true);
-		break;
 	case EVMMatchState::Lost:
-		DrawResults(GM, false);
+		DrawResults(GM, Car);
 		break;
 	default:
 		break;
@@ -283,15 +300,63 @@ void AVMHUD::DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car)
 	}
 }
 
-void AVMHUD::DrawResults(AVMGameMode* GM, bool bWon)
+void AVMHUD::DrawResults(AVMGameMode* GM, AVMVehiclePawn* Car)
 {
 	const float CX = Canvas->ClipX * 0.5f;
-	const float CY = Canvas->ClipY * 0.4f;
-	Label(bWon ? TEXT("VICTORY") : TEXT("DEFEAT"), CX, CY, bWon ? FLinearColor(0.3f, 1.f, 0.35f) : FLinearColor(1.f, 0.2f, 0.15f), 5.f, true);
-	Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
-	Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), GM->GetPoints(), GM->GetPedestriansKilled(), GM->GetRivalsWrecked()), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
-	Label(FString::Printf(TEXT("+%d credits"), GM->GetCreditsEarned()), CX, CY + 185.f * S, FLinearColor(0.4f, 0.9f, 1.f), 1.6f, true);
-	Label(GM->IsQuickRace() ? TEXT("Press Enter / A to continue") : TEXT("Press Enter / A for the garage"), CX, CY + 240.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+	const float CY = Canvas->ClipY * 0.3f;
+	const FLinearColor Green(0.3f, 1.f, 0.35f);
+	const FLinearColor Red(1.f, 0.2f, 0.15f);
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), 0.f, CY - 70.f * S, Canvas->ClipX, 520.f * S);
+
+	if (!GM->IsSplitScreen())
+	{
+		const bool bWon = GM->GetMatchState() == EVMMatchState::Won;
+		const FVMPlayerStats Stats = GM->GetStatsFor(Car);
+		Label(bWon ? TEXT("VICTORY") : TEXT("DEFEAT"), CX, CY, bWon ? Green : Red, 5.f, true);
+		Label(GM->GetResultText(), CX, CY + 90.f * S, FLinearColor::White, 1.8f, true);
+		Label(FString::Printf(TEXT("%d points   %d pedestrians   %d wrecks"), Stats.Points, Stats.PedestriansKilled, Stats.Wrecks), CX, CY + 140.f * S, FLinearColor(1.f, 0.8f, 0.2f), 1.3f, true);
+		if (!GM->IsQuickRace())
+		{
+			Label(FString::Printf(TEXT("+%d credits"), GM->GetCreditsEarned()), CX, CY + 185.f * S, FLinearColor(0.4f, 0.9f, 1.f), 1.6f, true);
+		}
+		Label(GM->IsQuickRace() ? TEXT("Press Enter / A to continue") : TEXT("Press Enter / A for the garage"), CX, CY + 240.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f, true);
+		return;
+	}
+
+	// Split-screen: who won, then a scoreboard of every player.
+	const AVMVehiclePawn* Winner = GM->GetWinner();
+	const int32 WinnerNumber = GM->GetPlayerNumber(Winner);
+	FString Title = TEXT("NO WINNER");
+	FLinearColor TitleColor = Red;
+	if (Winner && Winner == Car)
+	{
+		Title = TEXT("YOU WIN!");
+		TitleColor = Green;
+	}
+	else if (WinnerNumber > 0)
+	{
+		Title = FString::Printf(TEXT("P%d WINS"), WinnerNumber);
+		TitleColor = AVMGameMode::GetPlayerColor(WinnerNumber);
+	}
+	else if (Winner)
+	{
+		Title = FString::Printf(TEXT("%s WINS"), *Winner->DriverName.ToUpper());
+	}
+	Label(Title, CX, CY, TitleColor, 4.f, true);
+	Label(GM->GetResultText(), CX, CY + 75.f * S, FLinearColor::White, 1.4f, true);
+
+	TArray<AVMVehiclePawn*> Humans = GM->GetHumanVehicles();
+	Humans.Sort([GM](const AVMVehiclePawn& A, const AVMVehiclePawn& B) { return GM->GetStatsFor(&A).Points > GM->GetStatsFor(&B).Points; });
+	float Y = CY + 125.f * S;
+	for (const AVMVehiclePawn* Human : Humans)
+	{
+		const FVMPlayerStats Stats = GM->GetStatsFor(Human);
+		const int32 Number = GM->GetPlayerNumber(Human);
+		Label(FString::Printf(TEXT("P%d   %d pts   %d pedestrians   %d wrecks%s"), Number, Stats.Points, Stats.PedestriansKilled, Stats.Wrecks, Human->IsWrecked() ? TEXT("   (wrecked)") : TEXT("")),
+			CX, Y, AVMGameMode::GetPlayerColor(Number), 1.2f, true);
+		Y += 38.f * S;
+	}
+	Label(TEXT("Press Enter / A to continue"), CX, Y + 20.f * S, FLinearColor(0.8f, 0.8f, 0.8f), 1.1f, true);
 }
 
 void AVMHUD::DrawGarage(AVMGameMode* GM)
@@ -446,6 +511,10 @@ void AVMHUD::DrawMenu(AVMGameMode* GM, bool bPause)
 		case EVMMenuScreen::ConfirmNewCareer:
 			Title = TEXT("NEW CAREER");
 			Subtitle = TEXT("Start over? All credits, upgrades, cars and progress will be lost.");
+			break;
+		case EVMMenuScreen::SplitScreen:
+			Title = TEXT("SPLIT-SCREEN");
+			Subtitle = TEXT("2-4 players on one screen. P1 on keyboard or gamepad, everyone else on a gamepad.");
 			break;
 		case EVMMenuScreen::QuickRace:
 			Title = TEXT("QUICK RACE");

@@ -1,6 +1,7 @@
 # Vehicular Manslaughter
 
-An original, single-player arena vehicular-combat game for Unreal Engine 5 (C++).
+An original arena vehicular-combat game for Unreal Engine 5 (C++). It has a single-player career and
+2–4 player local split-screen.
 
 Race, ram and run down pedestrians in a walled arena against five AI rivals. There are three ways to win:
 
@@ -43,6 +44,7 @@ The game opens on the main menu, with the car slowly circling behind it:
 - **Career:** opens the garage for your current event.
 - **New Career:** wipes credits, upgrades, cars and progress, after asking you to confirm. Your settings
   are kept.
+- **Split-Screen:** 2–4 player local multiplayer (see [Split-screen](#split-screen)).
 - **Quick Race:** one race on any arena, with any car you own and a rival difficulty from 1 to 8. It gives
   no credits and no career progress.
 - **Settings:**
@@ -55,6 +57,37 @@ The game opens on the main menu, with the car slowly circling behind it:
 
 During a race, press **P / Start** to open the pause menu: Resume, Restart, or Quit to main menu. In menus,
 **Esc / Backspace / B** goes back. In the editor, Esc ends Play-In-Editor, so use Backspace there instead.
+
+## Split-screen
+
+Choose **Split-Screen** on the main menu and set up the match:
+
+- 2, 3 or 4 players
+- the arena
+- each player's car (every car is available here, owned or not)
+- 0–8 AI rivals and their difficulty
+- whether P1 uses the keyboard or a gamepad
+
+How the controls are assigned:
+
+- **P1 on keyboard (default):** gamepad 1 drives P2, gamepad 2 drives P3, and so on. Two players need one
+  gamepad.
+- **P1 on gamepad:** gamepad 1 drives P1, gamepad 2 drives P2, and so on. Every player needs a gamepad.
+
+Rules:
+
+- Everyone starts with no garage upgrades, so it's a level playing field.
+- There's no countdown clock.
+- You win by finishing the laps first, being the last car standing, or reaching the carnage target first.
+- If an AI rival finishes first, or every player is wrecked, nobody wins.
+
+Each player gets their own view with their own HUD: points, combo, position, lap, damage and nitro.
+Players have colour-coded roof markers and name tags (P1 blue, P2 red, P3 green, P4 yellow). Pickup
+and scoring messages only show on the screen of the player they're for. Rivals chase whichever player
+is nearest. The results screen shows a scoreboard for all players.
+
+Split-screen matches don't pay credits or affect your career. After the results, you go back to the
+split-screen setup screen.
 
 ## Arenas
 

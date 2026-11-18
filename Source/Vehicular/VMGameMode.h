@@ -24,6 +24,7 @@ enum class EVMMenuScreen : uint8
 	Main,
 	ConfirmNewCareer,
 	QuickRace,
+	SplitScreen,
 	Settings,
 	Controls
 };
@@ -44,6 +45,21 @@ struct FVMFeedMessage
 	UPROPERTY(BlueprintReadOnly) FString Text;
 	UPROPERTY(BlueprintReadOnly) FLinearColor Color = FLinearColor::White;
 	UPROPERTY(BlueprintReadOnly) float TimeLeft = 0.f;
+	/** Only this player's HUD shows the message; null = everyone. */
+	UPROPERTY() TWeakObjectPtr<AVMVehiclePawn> Target;
+};
+
+/** Per-human scoring (one entry per local player). */
+USTRUCT(BlueprintType)
+struct FVMPlayerStats
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) int32 Points = 0;
+	UPROPERTY(BlueprintReadOnly) int32 Combo = 0;
+	UPROPERTY(BlueprintReadOnly) int32 PedestriansKilled = 0;
+	UPROPERTY(BlueprintReadOnly) int32 Wrecks = 0;
+	double LastKillTime = -100.0;
 };
 
 /**
@@ -62,6 +78,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
+	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
 
 	// --- Rules ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules") int32 NumLaps = 3;
@@ -99,8 +116,8 @@ public:
 	void OnVehicleWrecked(AVMVehiclePawn* Victim, AVMVehiclePawn* Attacker);
 
 	void AddTime(float Seconds);
-	void AddPoints(int32 Amount);
-	void PushMessage(const FString& Text, const FLinearColor& Color = FLinearColor::White, float Duration = 3.f);
+	void AddPoints(AVMVehiclePawn* Who, int32 Amount);
+	void PushMessage(const FString& Text, const FLinearColor& Color = FLinearColor::White, float Duration = 3.f, AVMVehiclePawn* Target = nullptr);
 	void RestartMatch();
 
 	// --- Garage ---
@@ -145,10 +162,19 @@ public:
 	static EVMArena GetArenaForEvent(int32 InEvent) { return static_cast<EVMArena>((FMath::Max(1, InEvent) - 1) % VMArenas::Num); }
 	float GetTimeLeft() const { return TimeLeft; }
 	float GetCountdownLeft() const { return CountdownLeft; }
-	int32 GetPoints() const { return Points; }
-	int32 GetCombo() const { return Combo; }
-	int32 GetPedestriansKilled() const { return PedestriansKilled; }
-	int32 GetRivalsWrecked() const { return RivalsWrecked; }
+	FVMPlayerStats GetStatsFor(const AVMVehiclePawn* Vehicle) const;
+	/** Winner of a finished match (a human or a rival), or null if nobody won. */
+	AVMVehiclePawn* GetWinner() const { return Winner.Get(); }
+
+	// --- Split-screen ---
+	bool IsSplitScreen() const { return bSplitScreen; }
+	bool IsHuman(const AVMVehiclePawn* Vehicle) const;
+	/** Human-driven cars in local-player order (P1 first). */
+	TArray<AVMVehiclePawn*> GetHumanVehicles() const;
+	/** 1-based player number, or 0 for rivals. */
+	int32 GetPlayerNumber(const AVMVehiclePawn* Vehicle) const;
+	AVMVehiclePawn* GetNearestHuman(const FVector& Location) const;
+	static FLinearColor GetPlayerColor(int32 PlayerNumber);
 	const FString& GetResultText() const { return ResultText; }
 	const TArray<FVMFeedMessage>& GetMessages() const { return Messages; }
 	int32 GetNumCheckpoints() const { return Checkpoints.Num(); }
@@ -175,7 +201,10 @@ private:
 	FVector RandomGroundPoint();
 	float ProgressScore(const AVMVehiclePawn* Vehicle) const;
 	FVMRaceProgress GetProgress(const AVMVehiclePawn* Vehicle) const;
-	void EndMatch(bool bWon, const FString& Reason);
+	void EndMatch(AVMVehiclePawn* InWinner, const FString& Reason);
+	int32 LocalIndexOf(const AController* Controller) const;
+	FName HumanCarId(int32 LocalIndex) const;
+	void SetupLocalPlayers();
 
 	UPROPERTY() TObjectPtr<AVMArenaBuilder> Arena;
 	UPROPERTY() TArray<TObjectPtr<AVMCheckpoint>> Checkpoints;
@@ -191,12 +220,12 @@ private:
 	float TimeLeft = 60.f;
 	float CountdownLeft = 3.f;
 	float PedestrianSpawnTimer = 0.f;
-	double LastKillTime = -100.0;
-	int32 Points = 0;
-	int32 Combo = 0;
-	int32 PedestriansKilled = 0;
-	int32 RivalsWrecked = 0;
-	int32 HighlightedCheckpoint = -1;
+	UPROPERTY() TMap<TObjectPtr<AVMVehiclePawn>, FVMPlayerStats> HumanStats;
+	UPROPERTY() TMap<int32, TObjectPtr<AActor>> SplitStarts;
+	TWeakObjectPtr<AVMVehiclePawn> Winner;
+	int32 HighlightMask = -1;
+	int32 NumHumans = 1;
+	bool bSplitScreen = false;
 	bool bArenaReady = false;
 	bool bEventConfigured = false;
 

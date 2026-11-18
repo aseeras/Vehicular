@@ -139,7 +139,7 @@ void AVMVehiclePawn::BeginPlay()
 	Damage->OnPartBroken.AddDynamic(this, &AVMVehiclePawn::OnPartBroken);
 	Damage->OnWrecked.AddDynamic(this, &AVMVehiclePawn::OnWrecked);
 
-	if (!bIsRival)
+	if (!bIsRival && !bLoadoutAssigned)
 	{
 		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
 		{
@@ -155,7 +155,7 @@ void AVMVehiclePawn::BeginPlay()
 	BaseSteerAngle = GetDefault<UVMWheelFront>()->MaxSteerAngle;
 	ApplyCarDefinition();
 
-	if (!bIsRival)
+	if (!bIsRival && !bLoadoutAssigned)
 	{
 		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
 		{
@@ -169,7 +169,7 @@ void AVMVehiclePawn::BeginPlay()
 		EngineAudio = Sound->CreateEngineLoop(GetMesh());
 	}
 
-	Beacon->SetVisibility(bIsRival);
+	Beacon->SetVisibility(bIsRival || bShowBeacon);
 	VMUtil::Paint(Beacon, BeaconColor);
 
 	if (!HasVehicleMesh())
@@ -570,7 +570,7 @@ void AVMVehiclePawn::ReceivePickup(EVMPickupType Type)
 	{
 		if (AVMGameMode* GM = GetVMGameMode())
 		{
-			GM->PushMessage(FString::Printf(TEXT("Picked up %s"), *VMPickups::GetName(Type)), VMPickups::GetColor(Type));
+			GM->PushMessage(FString::Printf(TEXT("Picked up %s"), *VMPickups::GetName(Type)), VMPickups::GetColor(Type), 3.f, this);
 		}
 	}
 }
@@ -620,7 +620,7 @@ void AVMVehiclePawn::FireEMP()
 	}
 	if (GM && !bIsRival)
 	{
-		GM->PushMessage(FString::Printf(TEXT("EMP blast hit %d car(s)"), Hits), VMPickups::GetColor(EVMPickupType::EMP));
+		GM->PushMessage(FString::Printf(TEXT("EMP blast hit %d car(s)"), Hits), VMPickups::GetColor(EVMPickupType::EMP), 3.f, this);
 	}
 }
 
@@ -682,7 +682,7 @@ void AVMVehiclePawn::Recover()
 		if (AVMGameMode* GM = GetVMGameMode())
 		{
 			GM->AddTime(-3.f);
-			GM->PushMessage(TEXT("Recovered (-3s)"), FLinearColor(1.f, 0.7f, 0.2f));
+			GM->PushMessage(GM->IsSplitScreen() ? TEXT("Recovered") : TEXT("Recovered (-3s)"), FLinearColor(1.f, 0.7f, 0.2f), 2.f, this);
 		}
 	}
 }

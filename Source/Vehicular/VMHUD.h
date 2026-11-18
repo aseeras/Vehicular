@@ -22,18 +22,18 @@ private:
 	void Bar(float X, float Y, float W, float H, float Fraction, const FLinearColor& Color);
 	bool WorldToScreen(const FVector& World, FVector2D& OutScreen) const;
 
-	void DrawTopLeft(AVMGameMode* GM);
+	void DrawTopLeft(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawTopRight(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawBottomLeft(AVMVehiclePawn* Car);
 	void DrawDamage(AVMVehiclePawn* Car);
-	void DrawFeed(AVMGameMode* GM);
+	void DrawFeed(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawCheckpointMarker(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawRivalTags(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawCenter(AVMGameMode* GM, AVMVehiclePawn* Car);
 	void DrawGarage(AVMGameMode* GM);
 	void DrawMenu(AVMGameMode* GM, bool bPause);
 	void DrawControls(float X, float Y);
-	void DrawResults(AVMGameMode* GM, bool bWon);
+	void DrawResults(AVMGameMode* GM, AVMVehiclePawn* Car);
 
 	float S = 1.f;
 	UFont* Font = nullptr;

@@ -12,7 +12,8 @@ enum class EVMLoadIntent : uint8
 {
 	MainMenu,
 	CareerRace,
-	QuickRace
+	QuickRace,
+	SplitScreen
 };
 
 /** Owns the career save and lives for the whole session, so it survives level reloads. */
@@ -56,6 +57,17 @@ public:
 	// Quick race options (in memory).
 	EVMArena QuickArena = EVMArena::Lot;
 	int32 QuickDifficulty = 1;
+
+	// Split-screen options (in memory).
+	int32 SplitPlayers = 2;
+	EVMArena SplitArena = EVMArena::Lot;
+	int32 SplitRivals = 3;
+	int32 SplitDifficulty = 1;
+	/** P1 drives with the keyboard, so gamepad 1 goes to P2. */
+	bool bSplitP1Keyboard = true;
+	TArray<FName> SplitCars;
+	/** After a split-screen match, reopen the split-screen setup instead of the main menu. */
+	bool bReturnToSplitMenu = false;
 
 	// Settings (saved).
 	float GetMasterVolume() const;
