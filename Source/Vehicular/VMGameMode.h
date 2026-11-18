@@ -44,6 +44,7 @@ public:
 	virtual void StartPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 
 	// --- Rules ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Rules") int32 NumLaps = 3;
@@ -89,10 +90,14 @@ public:
 	/** Confirm button: results -> garage; in the garage buys the selected upgrade or starts the event. */
 	void HandleConfirm();
 	void NavigateGarage(int32 Direction);
+	/** Left/right: browses cars when the car row is selected. */
+	void NavigateGarageSide(int32 Direction);
 	void OpenGarage();
 	int32 GetGarageSelection() const { return GarageSelection; }
-	/** Upgrades first, then the "start event" entry. */
-	int32 GetNumGarageItems() const { return VMUpgrades::NumUpgrades + 1; }
+	/** Upgrades, then the car row, then "start event". */
+	int32 GetNumGarageItems() const { return VMUpgrades::NumUpgrades + 2; }
+	int32 GetCarRowIndex() const { return VMUpgrades::NumUpgrades; }
+	int32 GetGarageCarIndex() const { return GarageCarIndex; }
 	int32 GetCreditsEarned() const { return CreditsEarned; }
 	int32 GetEventNumber() const { return EventNumber; }
 	int32 GetRivalTier() const { return RivalTier; }
@@ -165,6 +170,7 @@ private:
 	int32 RivalTier = 0;
 	int32 CreditsEarned = 0;
 	int32 GarageSelection = 0;
+	int32 GarageCarIndex = 0;
 	int32 LastCountdownBeep = -1;
 	FString GarageNotice;
 };

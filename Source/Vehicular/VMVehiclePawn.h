@@ -86,6 +86,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
 	FVMUpgradeLevels Upgrades;
 
+	/** Which car from Project Settings > Vehicular Cars this is. The player's comes from the career save. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
+	FName CarId;
+
 	/** Extra forward acceleration while boosting (cm/s^2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicular")
 	float NitroAcceleration = 1500.f;
@@ -139,6 +143,9 @@ private:
 	void DropOilSlick();
 	void ToggleCamera();
 	void ApplyUpgrades();
+	void ApplyCarDefinition();
+	void AddKitPart(const TCHAR* Shape, const FVector& Location, const FRotator& Rotation, const FVector& Scale, const FLinearColor& Color);
+	void UpdateEffects(float DeltaSeconds);
 	void UpdateEngineSound(float DeltaSeconds);
 	EVMDamageZone ZoneFromWorldPoint(const FVector& WorldPoint) const;
 
@@ -154,6 +161,8 @@ private:
 	void OnRestartInput();
 	void OnNavUpInput();
 	void OnNavDownInput();
+	void OnNavLeftInput();
+	void OnNavRightInput();
 	void OnPauseInput();
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
@@ -168,6 +177,8 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> PauseAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> NavUpAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> NavDownAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> NavLeftAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> NavRightAction;
 
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> EngineAudio;
 
@@ -188,6 +199,12 @@ private:
 	bool bHoodCamera = false;
 	bool bHandlingDirty = true;
 	bool bWasBoosting = false;
+	bool bHandbrakeApplied = false;
+	float SmokeAccum = 0.f;
+	float FireAccum = 0.f;
+	float TyreAccum = 0.f;
+	float FlameAccum = 0.f;
+	int32 TyreSide = 0;
 	float EngineVolume = 0.f;
 
 	// Upgrade multipliers.

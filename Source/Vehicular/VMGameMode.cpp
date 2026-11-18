@@ -7,6 +7,7 @@
 #include "VMPedestrian.h"
 #include "VMPlayerController.h"
 #include "VMProfileSubsystem.h"
+#include "VMCarCatalog.h"
 #include "VMSoundSubsystem.h"
 #include "VMRivalAIController.h"
 #include "VMUtil.h"
@@ -50,6 +51,22 @@ AActor* AVMGameMode::ChoosePlayerStart_Implementation(AController* Player)
 	// The player can spawn before StartPlay, so make sure the arena and start grid exist.
 	EnsureArena();
 	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+UClass* AVMGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
+{
+	// A car can name its own Blueprint (with a custom mesh); otherwise use the default pawn.
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		if (const FVMCarDefinition* Car = UVMCarCatalog::Find(Profile->GetSelectedCar()))
+		{
+			if (UClass* Custom = Car->PawnClass.LoadSynchronous())
+			{
+				return Custom;
+			}
+		}
+	}
+	return Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 
 void AVMGameMode::EnsureArena()
@@ -164,10 +181,18 @@ void AVMGameMode::StartPlay()
 void AVMGameMode::SpawnRivals()
 {
 	UWorld* World = GetWorld();
-	UClass* Class = RivalClass ? RivalClass.Get() : AVMVehiclePawn::StaticClass();
+	const TArray<FVMCarDefinition>& Cars = UVMCarCatalog::GetCars();
 
 	for (int32 i = 0; i < NumRivals; ++i)
 	{
+		// Later events bring out better cars.
+		const FVMCarDefinition* Car = Cars.Num() > 0 ? &Cars[Rng.RandRange(0, FMath::Min(EventNumber, Cars.Num() - 1))] : nullptr;
+		UClass* Class = Car ? Car->PawnClass.LoadSynchronous() : nullptr;
+		if (!Class)
+		{
+			Class = RivalClass ? RivalClass.Get() : AVMVehiclePawn::StaticClass();
+		}
+
 		const FTransform T = GetGridTransform(i + 1);
 		AVMVehiclePawn* Rival = World->SpawnActorDeferred<AVMVehiclePawn>(Class, T, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Rival)
@@ -177,6 +202,7 @@ void AVMGameMode::SpawnRivals()
 		Rival->bIsRival = true;
 		Rival->DriverName = RivalNames[i % NumRivalPresets];
 		Rival->SetBeaconColor(RivalColors[i % NumRivalPresets]);
+		Rival->CarId = Car ? Car->Id : NAME_None;
 		Rival->Upgrades = FVMUpgradeLevels::Uniform(FMath::Clamp(RivalTier - Rng.RandRange(0, 1), 0, VMUpgrades::MaxLevel));
 		Rival->FinishSpawning(T);
 
@@ -519,6 +545,12 @@ void AVMGameMode::OpenGarage()
 	State = EVMMatchState::Garage;
 	GarageSelection = GetNumGarageItems() - 1; // start on "start event"
 	GarageNotice.Reset();
+	GarageCarIndex = 0;
+	if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+	{
+		const FName Selected = Profile->GetSelectedCar();
+		GarageCarIndex = FMath::Max(0, UVMCarCatalog::GetCars().IndexOfByPredicate([Selected](const FVMCarDefinition& Car) { return Car.Id == Selected; }));
+	}
 	if (UGameplayStatics::IsGamePaused(this))
 	{
 		UGameplayStatics::SetGamePaused(this, false);
@@ -533,6 +565,18 @@ void AVMGameMode::NavigateGarage(int32 Direction)
 	}
 	const int32 Count = GetNumGarageItems();
 	GarageSelection = (GarageSelection + Direction + Count) % Count;
+	GarageNotice.Reset();
+	UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove, 0.6f);
+}
+
+void AVMGameMode::NavigateGarageSide(int32 Direction)
+{
+	const int32 Count = UVMCarCatalog::GetCars().Num();
+	if (!IsInGarage() || GarageSelection != GetCarRowIndex() || Count == 0)
+	{
+		return;
+	}
+	GarageCarIndex = (GarageCarIndex + Direction + Count) % Count;
 	GarageNotice.Reset();
 	UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove, 0.6f);
 }
@@ -564,6 +608,35 @@ void AVMGameMode::HandleConfirm()
 			UVMSoundSubsystem::Play2D(this, EVMSound::Denied);
 			const bool bMaxed = Profile && Profile->GetNextUpgradeCost(Upgrade) < 0;
 			GarageNotice = bMaxed ? TEXT("Already at max level") : TEXT("Not enough credits");
+		}
+		return;
+	}
+
+	if (GarageSelection == GetCarRowIndex())
+	{
+		const TArray<FVMCarDefinition>& Cars = UVMCarCatalog::GetCars();
+		if (!Profile || !Cars.IsValidIndex(GarageCarIndex))
+		{
+			return;
+		}
+		const FVMCarDefinition& Car = Cars[GarageCarIndex];
+		if (Profile->IsCarOwned(Car.Id))
+		{
+			Profile->SelectCar(Car.Id);
+			UVMSoundSubsystem::Play2D(this, EVMSound::MenuMove);
+			GarageNotice = FString::Printf(TEXT("%s selected"), *Car.DisplayName);
+		}
+		else if (Profile->TryBuyCar(Car.Id))
+		{
+			UVMSoundSubsystem::Play2D(this, EVMSound::Purchase);
+			GarageNotice = FString::Printf(TEXT("%s unlocked and selected!"), *Car.DisplayName);
+		}
+		else
+		{
+			UVMSoundSubsystem::Play2D(this, EVMSound::Denied);
+			GarageNotice = Profile->GetEventsWon() < Car.RequiredWins
+				? FString::Printf(TEXT("Win %d event(s) to unlock %s"), Car.RequiredWins, *Car.DisplayName)
+				: TEXT("Not enough credits");
 		}
 		return;
 	}

@@ -4,6 +4,7 @@
 #include "VMGameMode.h"
 #include "VMVehiclePawn.h"
 #include "VMProfileSubsystem.h"
+#include "VMCarCatalog.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -304,14 +305,15 @@ void AVMHUD::DrawGarage(AVMGameMode* GM)
 	const float PanelW = 1040.f * S;
 	const int32 Event = Profile->GetEventNumber();
 
-	Label(TEXT("GARAGE"), W * 0.5f, 90.f * S, FLinearColor(1.f, 0.55f, 0.1f), 4.f, true);
-	Label(FString::Printf(TEXT("CREDITS  %d"), Profile->GetCredits()), Left, 160.f * S, FLinearColor(0.4f, 0.9f, 1.f), 2.f);
-	Label(FString::Printf(TEXT("Events won %d   Best score %d"), Profile->GetEventsWon(), Profile->GetBestPoints()), Left + PanelW - 380.f * S, 172.f * S, FLinearColor(0.7f, 0.7f, 0.7f), 1.1f);
+	Label(TEXT("GARAGE"), W * 0.5f, 80.f * S, FLinearColor(1.f, 0.55f, 0.1f), 4.f, true);
+	Label(FString::Printf(TEXT("CREDITS  %d"), Profile->GetCredits()), Left, 145.f * S, FLinearColor(0.4f, 0.9f, 1.f), 2.f);
+	Label(FString::Printf(TEXT("Events won %d   Best score %d"), Profile->GetEventsWon(), Profile->GetBestPoints()), Left + PanelW - 380.f * S, 157.f * S, FLinearColor(0.7f, 0.7f, 0.7f), 1.1f);
 
-	const float RowH = 78.f * S;
-	float Y = 240.f * S;
+	float Y = 220.f * S;
 	for (int32 i = 0; i < GM->GetNumGarageItems(); ++i)
 	{
+		const bool bCarRow = i == GM->GetCarRowIndex();
+		const float RowH = (bCarRow ? 150.f : 72.f) * S;
 		const bool bSelected = i == GM->GetGarageSelection();
 		DrawRect(bSelected ? FLinearColor(1.f, 0.55f, 0.1f, 0.25f) : FLinearColor(1.f, 1.f, 1.f, 0.05f), Left, Y, PanelW, RowH - 8.f * S);
 		if (bSelected)
@@ -319,7 +321,57 @@ void AVMHUD::DrawGarage(AVMGameMode* GM)
 			DrawRect(FLinearColor(1.f, 0.55f, 0.1f), Left, Y, 6.f * S, RowH - 8.f * S);
 		}
 
-		if (i < VMUpgrades::NumUpgrades)
+		if (bCarRow)
+		{
+			const TArray<FVMCarDefinition>& Cars = UVMCarCatalog::GetCars();
+			if (Cars.IsValidIndex(GM->GetGarageCarIndex()))
+			{
+				const FVMCarDefinition& Car = Cars[GM->GetGarageCarIndex()];
+				const bool bOwned = Profile->IsCarOwned(Car.Id);
+				const bool bCurrent = Profile->GetSelectedCar() == Car.Id;
+
+				Label(FString::Printf(TEXT("CAR  <  %s  >   %d/%d"), *Car.DisplayName, GM->GetGarageCarIndex() + 1, Cars.Num()), Left + 24.f * S, Y + 8.f * S, FLinearColor::White, 1.5f);
+				Label(Car.Description, Left + 24.f * S, Y + 42.f * S, FLinearColor(0.65f, 0.65f, 0.65f), 0.95f);
+
+				FString Status;
+				FLinearColor StatusColor;
+				if (bCurrent)
+				{
+					Status = TEXT("SELECTED");
+					StatusColor = FLinearColor(0.3f, 1.f, 0.35f);
+				}
+				else if (bOwned)
+				{
+					Status = TEXT("OWNED - select");
+					StatusColor = FLinearColor(0.8f, 0.8f, 0.8f);
+				}
+				else if (Profile->GetEventsWon() < Car.RequiredWins)
+				{
+					Status = FString::Printf(TEXT("LOCKED - win %d"), Car.RequiredWins);
+					StatusColor = FLinearColor(0.6f, 0.6f, 0.6f);
+				}
+				else
+				{
+					Status = FString::Printf(TEXT("%d cr"), Car.Price);
+					StatusColor = Profile->GetCredits() >= Car.Price ? FLinearColor(0.4f, 1.f, 0.45f) : FLinearColor(1.f, 0.3f, 0.25f);
+				}
+				Label(Status, Left + PanelW - 260.f * S, Y + 12.f * S, StatusColor, 1.3f);
+
+				// Stat bars.
+				struct FStat { const TCHAR* Name; float Value; };
+				const FStat Stats[] = {
+					{ TEXT("SPEED"), Car.SpeedRating() }, { TEXT("HANDLING"), Car.GripRating() },
+					{ TEXT("TOUGHNESS"), Car.ToughnessRating() }, { TEXT("RAMMING"), Car.RamRating() }
+				};
+				for (int32 StatIndex = 0; StatIndex < static_cast<int32>(UE_ARRAY_COUNT(Stats)); ++StatIndex)
+				{
+					const float SX = Left + 24.f * S + StatIndex * 250.f * S;
+					Label(Stats[StatIndex].Name, SX, Y + 80.f * S, FLinearColor(0.7f, 0.7f, 0.7f), 0.85f);
+					Bar(SX, Y + 108.f * S, 220.f * S, 12.f * S, Stats[StatIndex].Value, FLinearColor(1.f, 0.55f, 0.1f));
+				}
+			}
+		}
+		else if (i < VMUpgrades::NumUpgrades)
 		{
 			const EVMUpgrade Upgrade = static_cast<EVMUpgrade>(i);
 			const int32 Level = Profile->GetUpgradeLevel(Upgrade);
@@ -358,5 +410,5 @@ void AVMHUD::DrawGarage(AVMGameMode* GM)
 	{
 		Label(GM->GetGarageNotice(), W * 0.5f, Y + 30.f * S, FLinearColor(1.f, 0.85f, 0.3f), 1.3f, true);
 	}
-	Label(TEXT("Up / Down to choose     Enter / A to buy or start"), W * 0.5f, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.1f, true);
+	Label(TEXT("Up / Down to choose     Left / Right to browse cars     Enter / A to buy, select or start"), W * 0.5f, H - 60.f * S, FLinearColor(0.6f, 0.6f, 0.6f), 1.1f, true);
 }

@@ -55,6 +55,7 @@ startup from engine basic shapes. That arena includes:
 | Pause               | P               | Start              |
 | Continue / buy / start (menus) | Enter | A or Back     |
 | Garage menu up / down | ↑ ↓ or W / S  | D-pad             |
+| Browse cars (garage)  | ← → or A / D  | D-pad left / right |
 
 ## Gameplay
 
@@ -94,7 +95,36 @@ startup from engine basic shapes. That arena includes:
 | Nitro Tank     | +20% boost duration, fuller starting tank  |
 | Ram Bar        | +12% ramming damage dealt                  |
 
-Each upgrade has 5 levels, costing 400, 900, 1,600, 2,500 and 3,600 credits.
+Each upgrade has 5 levels, costing 400, 900, 1,600, 2,500 and 3,600 credits. Upgrades apply to whichever
+car you drive.
+
+### Cars
+
+Select the **Car** row in the garage, then use Left and Right to browse. Press Enter or A to buy a car or
+switch to one you own.
+
+| Car            | Unlock                | Character |
+|----------------|-----------------------|-----------|
+| Street Brawler | Free                  | Balanced all-rounder |
+| Wasp           | 1 win, 3,000 cr       | Light and fast, big nitro, fragile |
+| The Mule       | 1 win, 4,000 cr       | Heavy truck: tough, hits hard, slow to turn |
+| Juggernaut     | 2 wins, 8,000 cr      | Armoured and spiked, ramming monster |
+| Hornet X       | 4 wins, 12,000 cr     | Top-tier speed and grip |
+
+Cars differ in mass, power, grip, steering, toughness, ramming strength and nitro. Each one also has its
+own bolt-on parts so you can tell them apart:
+
+- bull bars
+- a roof rack with lamps
+- a spoiler
+- a spiked ram
+- armour plates
+- side exhausts
+
+Rivals drive better cars in later events.
+
+To change the roster or add cars, go to **Project Settings > Game > Vehicular Cars**. Each car can point
+to its own `VMVehiclePawn` Blueprint if you want it to have a different 3D model.
 
 Winning moves you to the next event:
 
@@ -117,6 +147,26 @@ All sound effects are synthesised in code at runtime, so the project needs no au
 To replace any of them with your own assets, go to **Project Settings > Game > Vehicular Audio**. You can
 assign a Sound Wave or MetaSound to any effect or to the engine loop, and set the effects and engine
 volumes there too.
+
+## Particle effects
+
+Particles are simulated in C++ and drawn with instanced basic shapes, so the project needs no VFX assets.
+Effects include:
+
+- sparks on impacts
+- engine smoke that grows and turns black as the car is damaged
+- fire and a smoke column on wrecked cars
+- explosions
+- tyre smoke when you slide or handbrake
+- nitro exhaust flames
+- pedestrian splats
+- an EMP shockwave ring
+- oil splashes
+
+The particles use the engine's plain shape material, so they're opaque and shrink away instead of fading.
+For proper glowing, fading VFX, go to **Project Settings > Game > Vehicular Effects** and assign Niagara
+systems to the burst effects: sparks, explosion, splat and EMP. You can also adjust particle density and
+the particle limit there.
 
 ## Using your own assets
 
@@ -149,6 +199,8 @@ All the gameplay classes can be subclassed in Blueprint:
 | `VMProfileSubsystem`, `VMSaveGame` | Career save: credits, upgrades, event progress |
 | `VMSoundSubsystem`, `VMSynth` | Procedural sound effects and engine audio |
 | `VMAudioSettings` | Project Settings page for replacing sounds |
+| `VMEffectsSubsystem`, `VMEffectsSettings` | Procedural particles and the Niagara override settings |
+| `VMCarCatalog` | Unlockable car roster and stats |
 
 ## Status and next steps
 
@@ -157,7 +209,6 @@ compiled yet**. Expect a few small fixes on the first build, depending on your e
 
 Ideas for next steps:
 
-- particle effects for sparks, smoke and fire
 - a main menu with settings
-- unlockable vehicles
 - more arena types
+- Niagara versions of the continuous effects (smoke, fire, tyre smoke, nitro flames)

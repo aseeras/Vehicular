@@ -86,6 +86,14 @@ void UVMDamageComponent::RepairAll()
 	OnDamaged.Broadcast(EVMDamageZone::Front, 0.f, nullptr);
 }
 
+void UVMDamageComponent::SetMaxZoneHealth(float NewMax)
+{
+	MaxZoneHealth = FMath::Max(1.f, NewMax);
+	ZoneHealth.Init(MaxZoneHealth, NumZones);
+	ZoneBreakStage.Init(0, NumZones);
+	bWrecked = false;
+}
+
 float UVMDamageComponent::GetZoneFraction(EVMDamageZone Zone) const
 {
 	return ZoneHealth[static_cast<int32>(Zone)] / MaxZoneHealth;

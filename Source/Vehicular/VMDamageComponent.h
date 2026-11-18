@@ -41,6 +41,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Damage")
 	void RepairAll();
 
+	/** Changes zone capacity (per car type) and refills every zone. */
+	void SetMaxZoneHealth(float NewMax);
+
 	UFUNCTION(BlueprintPure, Category = "Damage")
 	float GetZoneFraction(EVMDamageZone Zone) const;
 

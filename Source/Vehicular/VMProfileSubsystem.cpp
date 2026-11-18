@@ -1,5 +1,6 @@
 #include "VMProfileSubsystem.h"
 #include "VMSaveGame.h"
+#include "VMCarCatalog.h"
 #include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -16,6 +17,57 @@ void UVMProfileSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		Profile = Cast<UVMSaveGame>(UGameplayStatics::CreateSaveGameObject(UVMSaveGame::StaticClass()));
 	}
+	EnsureStarterCar();
+}
+
+void UVMProfileSubsystem::EnsureStarterCar()
+{
+	for (const FVMCarDefinition& Car : UVMCarCatalog::GetCars())
+	{
+		if (Car.Price <= 0 && Car.RequiredWins <= 0)
+		{
+			Profile->OwnedCars.AddUnique(Car.Id);
+		}
+	}
+	if (!IsCarOwned(Profile->SelectedCar))
+	{
+		Profile->SelectedCar = UVMCarCatalog::GetStarter().Id;
+	}
+}
+
+FName UVMProfileSubsystem::GetSelectedCar() const
+{
+	return Profile->SelectedCar;
+}
+
+bool UVMProfileSubsystem::IsCarOwned(FName CarId) const
+{
+	return Profile->OwnedCars.Contains(CarId);
+}
+
+bool UVMProfileSubsystem::SelectCar(FName CarId)
+{
+	if (!IsCarOwned(CarId))
+	{
+		return false;
+	}
+	Profile->SelectedCar = CarId;
+	Save();
+	return true;
+}
+
+bool UVMProfileSubsystem::TryBuyCar(FName CarId)
+{
+	const FVMCarDefinition* Car = UVMCarCatalog::Find(CarId);
+	if (!Car || IsCarOwned(CarId) || Profile->EventsWon < Car->RequiredWins || Profile->Credits < Car->Price)
+	{
+		return false;
+	}
+	Profile->Credits -= Car->Price;
+	Profile->OwnedCars.Add(CarId);
+	Profile->SelectedCar = CarId;
+	Save();
+	return true;
 }
 
 UVMProfileSubsystem* UVMProfileSubsystem::Get(const UObject* WorldContext)
@@ -74,6 +126,7 @@ void UVMProfileSubsystem::RecordEvent(bool bWon, int32 Points)
 void UVMProfileSubsystem::ResetCareer()
 {
 	Profile = Cast<UVMSaveGame>(UGameplayStatics::CreateSaveGameObject(UVMSaveGame::StaticClass()));
+	EnsureStarterCar();
 	Save();
 }
 

@@ -1,6 +1,7 @@
 #include "VMPedestrian.h"
 #include "VMGameMode.h"
 #include "VMSoundSubsystem.h"
+#include "VMEffectsSubsystem.h"
 #include "VMUtil.h"
 #include "VMVehiclePawn.h"
 #include "AIController.h"
@@ -185,6 +186,10 @@ void AVMPedestrian::Knockdown(AVMVehiclePawn* Killer)
 		Part->AddAngularImpulseInDegrees(FMath::VRand() * 720.f, NAME_None, true);
 	}
 	Splat->SetVisibility(true);
+	if (UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this))
+	{
+		FX->Splat(GetActorLocation(), Killer ? Killer->GetVelocity() : FVector::ZeroVector);
+	}
 	UVMSoundSubsystem::PlayAt(this, EVMSound::Squash, GetActorLocation(), 0.9f, FMath::FRandRange(0.85f, 1.2f));
 
 	if (AVMGameMode* GM = GetWorld()->GetAuthGameMode<AVMGameMode>())

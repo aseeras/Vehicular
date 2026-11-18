@@ -17,4 +17,6 @@ public:
 	UPROPERTY() int32 EventsWon = 0;
 	UPROPERTY() int32 BestPoints = 0;
 	UPROPERTY() FVMUpgradeLevels Upgrades;
+	UPROPERTY() TArray<FName> OwnedCars;
+	UPROPERTY() FName SelectedCar;
 };

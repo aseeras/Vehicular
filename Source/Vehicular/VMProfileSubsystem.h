@@ -28,6 +28,14 @@ public:
 	int32 GetNextUpgradeCost(EVMUpgrade Upgrade) const;
 
 	bool TryPurchase(EVMUpgrade Upgrade);
+
+	// Cars
+	FName GetSelectedCar() const;
+	bool IsCarOwned(FName CarId) const;
+	bool SelectCar(FName CarId);
+	/** Buys (and selects) a car if it's unlocked by wins and affordable. */
+	bool TryBuyCar(FName CarId);
+
 	void AwardCredits(int32 Amount);
 	void RecordEvent(bool bWon, int32 Points);
 	void ResetCareer();
@@ -38,6 +46,7 @@ public:
 
 private:
 	void Save();
+	void EnsureStarterCar();
 
 	UPROPERTY() TObjectPtr<UVMSaveGame> Profile;
 	bool bSkipGarage = false;

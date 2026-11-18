@@ -13,6 +13,7 @@
 	],
 	"Plugins": [
 		{ "Name": "ChaosVehiclesPlugin", "Enabled": true },
-		{ "Name": "EnhancedInput", "Enabled": true }
+		{ "Name": "EnhancedInput", "Enabled": true },
+		{ "Name": "Niagara", "Enabled": true }
 	]
 }

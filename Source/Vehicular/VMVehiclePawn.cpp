@@ -6,6 +6,8 @@
 #include "VMProfileSubsystem.h"
 #include "VMSoundSubsystem.h"
 #include "VMAudioSettings.h"
+#include "VMCarCatalog.h"
+#include "VMEffectsSubsystem.h"
 #include "VMRivalAIController.h"
 #include "VMUtil.h"
 #include "VMWheels.h"
@@ -137,6 +139,13 @@ void AVMVehiclePawn::BeginPlay()
 	Damage->OnPartBroken.AddDynamic(this, &AVMVehiclePawn::OnPartBroken);
 	Damage->OnWrecked.AddDynamic(this, &AVMVehiclePawn::OnWrecked);
 
+	if (!bIsRival)
+	{
+		if (const UVMProfileSubsystem* Profile = UVMProfileSubsystem::Get(this))
+		{
+			CarId = Profile->GetSelectedCar();
+		}
+	}
 	if (UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement())
 	{
 		BaseMaxTorque = Move->EngineSetup.MaxTorque;
@@ -144,6 +153,7 @@ void AVMVehiclePawn::BeginPlay()
 	BaseFrontFriction = GetDefault<UVMWheelFront>()->FrictionForceMultiplier;
 	BaseRearFriction = GetDefault<UVMWheelRear>()->FrictionForceMultiplier;
 	BaseSteerAngle = GetDefault<UVMWheelFront>()->MaxSteerAngle;
+	ApplyCarDefinition();
 
 	if (!bIsRival)
 	{
@@ -206,7 +216,7 @@ void AVMVehiclePawn::ApplyUpgrades()
 	ArmourMultiplier = 1.f - 0.08f * ArmourLvl;
 	NitroDuration *= 1.f + 0.2f * NitroLvl;
 	NitroCharge = FMath::Min(1.f, 0.5f + 0.1f * NitroLvl);
-	RamMultiplier = 1.f + 0.12f * RamLvl;
+	RamMultiplier *= 1.f + 0.12f * RamLvl;
 	bHandlingDirty = true;
 }
 
@@ -288,6 +298,7 @@ void AVMVehiclePawn::Tick(float DeltaSeconds)
 	}
 	bWasBoosting = bBoosting;
 	UpdateEngineSound(DeltaSeconds);
+	UpdateEffects(DeltaSeconds);
 
 	if (bHandlingDirty)
 	{
@@ -311,8 +322,10 @@ void AVMVehiclePawn::SetDriveInput(float Throttle, float Steering, bool bHandbra
 		Move->SetBrakeInput(0.f);
 		Move->SetSteeringInput(0.f);
 		Move->SetHandbrakeInput(true);
+		bHandbrakeApplied = false;
 		return;
 	}
+	bHandbrakeApplied = bHandbrake;
 
 	if (IsStunned())
 	{
@@ -430,6 +443,10 @@ void AVMVehiclePawn::OnChassisHit(UPrimitiveComponent* HitComp, AActor* OtherAct
 		UVMSoundSubsystem::PlayAt(this, bHeavy ? EVMSound::ImpactHeavy : EVMSound::ImpactLight, Hit.ImpactPoint,
 			FMath::Clamp(0.4f + Applied / 30.f, 0.4f, 1.f), FMath::FRandRange(0.85f, 1.15f));
 		SpawnDebris(Hit.ImpactPoint, Applied > 15.f ? 3 : 1, 400.f);
+		if (UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this))
+		{
+			FX->Sparks(Hit.ImpactPoint, Hit.ImpactNormal, FMath::Clamp(FMath::RoundToInt(Applied * 1.5f), 6, 60), bHeavy ? 1300.f : 800.f);
+		}
 		if (AVMGameMode* GM = GetVMGameMode())
 		{
 			GM->OnVehicleDamaged(this, OtherCar, Applied);
@@ -459,6 +476,10 @@ void AVMVehiclePawn::OnWrecked(AActor* FinalBlowCauser)
 {
 	bNitroHeld = false;
 	UVMSoundSubsystem::PlayAt(this, EVMSound::Explosion, GetActorLocation(), 1.f, FMath::FRandRange(0.9f, 1.1f));
+	if (UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this))
+	{
+		FX->Explosion(GetActorLocation() + FVector(0.f, 0.f, 80.f));
+	}
 	if (EngineAudio)
 	{
 		EngineAudio->FadeOut(0.5f, 0.f);
@@ -552,6 +573,10 @@ void AVMVehiclePawn::FireEMP()
 {
 	AVMGameMode* GM = GetVMGameMode();
 	UVMSoundSubsystem::PlayAt(this, EVMSound::EMP, GetActorLocation());
+	if (UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this))
+	{
+		FX->EMPBurst(GetActorLocation(), 3000.f);
+	}
 	int32 Hits = 0;
 	for (TActorIterator<AVMVehiclePawn> It(GetWorld()); It; ++It)
 	{
@@ -589,6 +614,10 @@ void AVMVehiclePawn::DropOilSlick()
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	GetWorld()->SpawnActor<AVMOilSlick>(Loc, FRotator(0.f, GetActorRotation().Yaw, 0.f), Params);
 	UVMSoundSubsystem::PlayAt(this, EVMSound::Oil, Loc);
+	if (UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this))
+	{
+		FX->OilSplash(Loc);
+	}
 }
 
 void AVMVehiclePawn::ApplyStun(float Seconds)
@@ -695,6 +724,8 @@ void AVMVehiclePawn::BuildInputAssets()
 	PauseAction->bTriggerWhenPaused = true;
 	NavUpAction = MakeAction(this, TEXT("IA_NavUp"), EInputActionValueType::Boolean);
 	NavDownAction = MakeAction(this, TEXT("IA_NavDown"), EInputActionValueType::Boolean);
+	NavLeftAction = MakeAction(this, TEXT("IA_NavLeft"), EInputActionValueType::Boolean);
+	NavRightAction = MakeAction(this, TEXT("IA_NavRight"), EInputActionValueType::Boolean);
 
 	InputContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Vehicle"));
 
@@ -730,6 +761,12 @@ void AVMVehiclePawn::BuildInputAssets()
 	InputContext->MapKey(NavDownAction, EKeys::Down);
 	InputContext->MapKey(NavDownAction, EKeys::S);
 	InputContext->MapKey(NavDownAction, EKeys::Gamepad_DPad_Down);
+	InputContext->MapKey(NavLeftAction, EKeys::Left);
+	InputContext->MapKey(NavLeftAction, EKeys::A);
+	InputContext->MapKey(NavLeftAction, EKeys::Gamepad_DPad_Left);
+	InputContext->MapKey(NavRightAction, EKeys::Right);
+	InputContext->MapKey(NavRightAction, EKeys::D);
+	InputContext->MapKey(NavRightAction, EKeys::Gamepad_DPad_Right);
 	InputContext->MapKey(PauseAction, EKeys::P);
 	InputContext->MapKey(PauseAction, EKeys::Gamepad_Special_Right);
 }
@@ -773,6 +810,8 @@ void AVMVehiclePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnPauseInput);
 	Input->BindAction(NavUpAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavUpInput);
 	Input->BindAction(NavDownAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavDownInput);
+	Input->BindAction(NavLeftAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavLeftInput);
+	Input->BindAction(NavRightAction, ETriggerEvent::Started, this, &AVMVehiclePawn::OnNavRightInput);
 }
 
 void AVMVehiclePawn::OnThrottleInput(const FInputActionValue& Value) { PlayerThrottle = Value.Get<float>(); }
@@ -815,4 +854,173 @@ void AVMVehiclePawn::OnPauseInput()
 		return;
 	}
 	UGameplayStatics::SetGamePaused(this, !UGameplayStatics::IsGamePaused(this));
+}
+
+void AVMVehiclePawn::OnNavLeftInput()
+{
+	if (AVMGameMode* GM = GetVMGameMode())
+	{
+		GM->NavigateGarageSide(-1);
+	}
+}
+
+void AVMVehiclePawn::OnNavRightInput()
+{
+	if (AVMGameMode* GM = GetVMGameMode())
+	{
+		GM->NavigateGarageSide(1);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Car types
+// ---------------------------------------------------------------------------------------------
+
+void AVMVehiclePawn::ApplyCarDefinition()
+{
+	const FVMCarDefinition* Found = UVMCarCatalog::Find(CarId);
+	const FVMCarDefinition& Car = Found ? *Found : UVMCarCatalog::GetStarter();
+	CarId = Car.Id;
+
+	if (UChaosWheeledVehicleMovementComponent* Move = GetChaosMovement())
+	{
+		if (!FMath::IsNearlyEqual(Move->Mass, Car.MassKg))
+		{
+			Move->Mass = Car.MassKg;
+			Move->RecreatePhysicsState(); // the vehicle sim reads mass when its physics state is built
+		}
+	}
+	BaseMaxTorque *= Car.TorqueMultiplier;
+	BaseFrontFriction *= Car.GripMultiplier;
+	BaseRearFriction *= Car.GripMultiplier;
+	BaseSteerAngle *= Car.SteerMultiplier;
+	Damage->SetMaxZoneHealth(100.f * Car.HealthMultiplier);
+	RamMultiplier = Car.RamMultiplier;
+	NitroAcceleration *= Car.NitroMultiplier;
+	bHandlingDirty = true;
+
+	// Bolt-on parts so each car type is recognisable. Offsets assume a car about 4.5m x 2m.
+	const FLinearColor Kit = Car.KitColor;
+	const FLinearColor Steel(0.6f, 0.6f, 0.62f);
+	for (EVMBodyKit Part : Car.BodyKits)
+	{
+		switch (Part)
+		{
+		case EVMBodyKit::BullBar:
+			AddKitPart(TEXT("Cube"), FVector(238.f, 0.f, 55.f), FRotator::ZeroRotator, FVector(0.12f, 1.8f, 0.12f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(238.f, 0.f, 85.f), FRotator::ZeroRotator, FVector(0.12f, 1.6f, 0.1f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(236.f, -55.f, 65.f), FRotator::ZeroRotator, FVector(0.1f, 0.1f, 0.5f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(236.f, 55.f, 65.f), FRotator::ZeroRotator, FVector(0.1f, 0.1f, 0.5f), Kit);
+			break;
+		case EVMBodyKit::RoofRack:
+			AddKitPart(TEXT("Cube"), FVector(-20.f, -55.f, 150.f), FRotator::ZeroRotator, FVector(1.6f, 0.06f, 0.06f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(-20.f, 55.f, 150.f), FRotator::ZeroRotator, FVector(1.6f, 0.06f, 0.06f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(30.f, 0.f, 152.f), FRotator::ZeroRotator, FVector(0.06f, 1.2f, 0.06f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(-70.f, 0.f, 152.f), FRotator::ZeroRotator, FVector(0.06f, 1.2f, 0.06f), Kit);
+			AddKitPart(TEXT("Sphere"), FVector(45.f, -35.f, 165.f), FRotator::ZeroRotator, FVector(0.22f), FLinearColor(1.f, 0.95f, 0.6f));
+			AddKitPart(TEXT("Sphere"), FVector(45.f, 35.f, 165.f), FRotator::ZeroRotator, FVector(0.22f), FLinearColor(1.f, 0.95f, 0.6f));
+			break;
+		case EVMBodyKit::Spoiler:
+			AddKitPart(TEXT("Cube"), FVector(-215.f, 0.f, 128.f), FRotator(-6.f, 0.f, 0.f), FVector(0.35f, 1.8f, 0.04f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(-210.f, -60.f, 108.f), FRotator::ZeroRotator, FVector(0.12f, 0.04f, 0.4f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(-210.f, 60.f, 108.f), FRotator::ZeroRotator, FVector(0.12f, 0.04f, 0.4f), Kit);
+			break;
+		case EVMBodyKit::SpikeRam:
+			for (int32 i = -2; i <= 2; ++i)
+			{
+				AddKitPart(TEXT("Cone"), FVector(250.f, i * 38.f, 50.f), FRotator(-90.f, 0.f, 0.f), FVector(0.22f, 0.22f, 0.55f), Steel);
+			}
+			break;
+		case EVMBodyKit::ArmourPlates:
+			AddKitPart(TEXT("Cube"), FVector(0.f, -106.f, 60.f), FRotator::ZeroRotator, FVector(3.4f, 0.06f, 0.5f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(0.f, 106.f, 60.f), FRotator::ZeroRotator, FVector(3.4f, 0.06f, 0.5f), Kit);
+			AddKitPart(TEXT("Cube"), FVector(225.f, 0.f, 70.f), FRotator(-15.f, 0.f, 0.f), FVector(0.08f, 1.9f, 0.55f), Kit);
+			break;
+		case EVMBodyKit::SideExhausts:
+			AddKitPart(TEXT("Cylinder"), FVector(-60.f, -103.f, 35.f), FRotator(90.f, 0.f, 0.f), FVector(0.12f, 0.12f, 1.4f), Steel);
+			AddKitPart(TEXT("Cylinder"), FVector(-60.f, 103.f, 35.f), FRotator(90.f, 0.f, 0.f), FVector(0.12f, 0.12f, 1.4f), Steel);
+			break;
+		}
+	}
+}
+
+void AVMVehiclePawn::AddKitPart(const TCHAR* Shape, const FVector& Location, const FRotator& Rotation, const FVector& Scale, const FLinearColor& Color)
+{
+	UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+	Part->SetStaticMesh(VMUtil::Shape(Shape));
+	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Part->SetupAttachment(GetMesh());
+	Part->SetRelativeTransform(FTransform(Rotation, Location, Scale));
+	Part->RegisterComponent();
+	AddInstanceComponent(Part);
+	VMUtil::Paint(Part, Color);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Particles
+// ---------------------------------------------------------------------------------------------
+
+void AVMVehiclePawn::UpdateEffects(float DeltaSeconds)
+{
+	UVMEffectsSubsystem* FX = UVMEffectsSubsystem::Get(this);
+	if (!FX)
+	{
+		return;
+	}
+	const FTransform& T = GetActorTransform();
+	const FVector Vel = GetVelocity();
+
+	// Engine smoke once the car is hurt; black smoke and fire once it's wrecked.
+	const float Health = Damage->GetTotalFraction();
+	float SmokeRate = 0.f;
+	bool bDarkSmoke = false;
+	if (IsWrecked())
+	{
+		SmokeRate = 25.f;
+		bDarkSmoke = true;
+		FireAccum += 14.f * DeltaSeconds;
+		while (FireAccum >= 1.f)
+		{
+			FireAccum -= 1.f;
+			FX->FirePuff(T.TransformPosition(FVector(FMath::FRandRange(-150.f, 200.f), FMath::FRandRange(-60.f, 60.f), 90.f)));
+		}
+	}
+	else if (Health < 0.6f)
+	{
+		SmokeRate = FMath::Lerp(3.f, 20.f, FMath::Clamp((0.6f - Health) / 0.35f, 0.f, 1.f));
+		bDarkSmoke = Health < 0.4f;
+	}
+	SmokeAccum += SmokeRate * DeltaSeconds;
+	while (SmokeAccum >= 1.f)
+	{
+		SmokeAccum -= 1.f;
+		FX->SmokePuff(T.TransformPosition(FVector(170.f, FMath::FRandRange(-40.f, 40.f), 95.f)), Vel * 0.3f + FVector(0.f, 0.f, 120.f), bDarkSmoke, IsWrecked() ? 110.f : 70.f);
+	}
+
+	// Tyre smoke when sliding or handbraking at speed.
+	const float Speed = Vel.Size();
+	const float Lateral = FMath::Abs(FVector::DotProduct(Vel, GetActorRightVector()));
+	const bool bSliding = !IsWrecked() && Speed > 700.f && (Lateral > 450.f || (bHandbrakeApplied && Speed > 900.f));
+	if (bSliding)
+	{
+		TyreAccum += 40.f * DeltaSeconds;
+		while (TyreAccum >= 1.f)
+		{
+			TyreAccum -= 1.f;
+			TyreSide ^= 1;
+			FX->TyreSmoke(T.TransformPosition(FVector(-140.f, TyreSide ? 85.f : -85.f, 15.f)), Vel);
+		}
+	}
+
+	// Exhaust flames while boosting.
+	if (bWasBoosting)
+	{
+		FlameAccum += 70.f * DeltaSeconds;
+		while (FlameAccum >= 1.f)
+		{
+			FlameAccum -= 1.f;
+			TyreSide ^= 1;
+			FX->NitroFlame(T.TransformPosition(FVector(-235.f, TyreSide ? 35.f : -35.f, 45.f)), -GetActorForwardVector(), Vel);
+		}
+	}
 }
